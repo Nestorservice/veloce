@@ -1,0 +1,25 @@
+# Build artifacts
+veloce
+veloce.exe
+*.exe
+dist/
+
+# Generated migration output
+output/
+test_out/
+test_empty/
+
+# Veloce state directory (when output/ is elsewhere)
+.veloce/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude session metadata
+.claude/
