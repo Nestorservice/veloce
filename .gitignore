@@ -5,7 +5,7 @@
 dist/
 
 # Generated migration output
-output/
+/output/
 test_out/
 test_empty/
 
