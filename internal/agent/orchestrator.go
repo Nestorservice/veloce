@@ -11,11 +11,12 @@ import (
 type ProcessFn func(ctx context.Context, f scanner.File) error
 
 type Orchestrator struct {
-	Files       []scanner.File
-	Workers     int
-	ProcessFn   ProcessFn
-	OnPhaseEnd  func(phase int)
-	BudgetCheck func() bool // optional; return true to stop
+	Files        []scanner.File
+	Workers      int
+	ProcessFn    ProcessFn
+	OnPhaseStart func(phase int, n int)
+	OnPhaseEnd   func(phase int)
+	BudgetCheck  func() bool // optional; return true to stop
 }
 
 func (o *Orchestrator) Run(ctx context.Context) error {
@@ -33,6 +34,9 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 	sort.Ints(phases)
 
 	for _, p := range phases {
+		if o.OnPhaseStart != nil {
+			o.OnPhaseStart(p, len(byPhase[p]))
+		}
 		if err := o.runPhase(ctx, byPhase[p]); err != nil {
 			return err
 		}

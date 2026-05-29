@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -139,12 +140,21 @@ func runMigrate(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("budget exhausted")
 		}
 		if entry, ok := mig.Get(f.RelPath); ok && entry.Status == state.StatusDone {
+			fmt.Printf("  %s  %s  %s\n", paint(cGreen, "✓ done   "), paint(cDim+cGray, "(cached)"), paint(cDim+cGray, f.RelPath))
 			return nil
 		}
+		fmt.Printf("  %s  %s\n", paint(cYellow, "→ start  "), paint(cWhite, f.RelPath))
+		t0 := time.Now()
 		err := worker.Process(ctx, f)
 		_ = mig.Save()
 		_ = st.Save()
 		_ = tu.Save()
+		dur := time.Since(t0).Round(100 * time.Millisecond)
+		if err != nil {
+			fmt.Printf("  %s  %s  %s\n", paint(cPink+cBold, "✗ fail   "), paint(cDim+cGray, dur.String()), paint(cPink, f.RelPath+" — "+err.Error()))
+		} else {
+			fmt.Printf("  %s  %s  %s\n", paint(cGreen, "✓ done   "), paint(cDim+cGray, dur.String()), paint(cWhite, f.RelPath))
+		}
 		return err
 	}
 
@@ -153,11 +163,15 @@ func runMigrate(cmd *cobra.Command, args []string) error {
 		Workers:     cfg.Workers,
 		ProcessFn:   processFn,
 		BudgetCheck: tu.Exceeded,
+		OnPhaseStart: func(p int, n int) {
+			fmt.Println()
+			fmt.Println(paint(cBlue+cBold, fmt.Sprintf("▶ Phase %d  —  %d file(s) to process", p, n)))
+		},
 		OnPhaseEnd: func(p int) {
 			_ = mig.Save()
 			_ = st.Save()
 			_ = tu.Save()
-			log.Printf("phase %d complete", p)
+			fmt.Println(paint(cGreen+cBold, fmt.Sprintf("✓ Phase %d complete", p)))
 		},
 	}
 
