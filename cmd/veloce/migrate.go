@@ -35,6 +35,7 @@ func registerMigrateFlags(flags *pflag.FlagSet) {
 	flags.BoolVar(&migrateFlags.Resume, "resume", true, "Resume from last checkpoint if present")
 	flags.BoolVar(&migrateFlags.DryRun, "dry-run", false, "Skip API + writes (analysis only)")
 	flags.BoolVar(&migrateFlags.RunTests, "run-tests", false, "Run go test / flutter test after each file")
+	flags.IntVar(&migrateFlags.RPM, "rpm", 0, "Max requests/min to Gemini (default: 5 — Gemini free tier)")
 }
 
 func init() {
@@ -96,17 +97,26 @@ func runMigrate(cmd *cobra.Command, args []string) error {
 
 	flash := gemini.NewFlashClient(cfg.APIKey)
 	pro := gemini.NewProClient(cfg.APIKey)
+	limiter := gemini.NewRateLimiter(cfg.RPM)
+	gemini.AttachLimiter(flash, limiter)
+	gemini.AttachLimiter(pro, limiter)
+	log.Printf("rate limit: %d req/min (use --rpm to override)", cfg.RPM)
 
 	rules := []byte(embeddedRules)
 
 	cm := gemini.NewCacheManager(cfg.APIKey, cfg.Output)
 	cacheID, _ := cm.LoadCacheID()
-	if cacheID == "" && !cfg.DryRun {
+	// Gemini requires >= 1024 tokens for cache creation (roughly 4 KB of text).
+	const minCacheBytes = 4500
+	cacheable := len(rules)+len(st.RenderForPrompt()) >= minCacheBytes
+	if cacheID == "" && !cfg.DryRun && cacheable {
 		cacheID, err = cm.EnsureCache(string(rules), st.RenderForPrompt())
 		if err != nil {
 			log.Printf("cache create failed (continuing without cache): %v", err)
 			cacheID = ""
 		}
+	} else if !cacheable {
+		log.Printf("cache skipped: payload too small (Gemini requires ≥1024 tokens)")
 	}
 
 	corrector := pipeline.NewCorrector(flash, pro, func(string) pipeline.VerifyResult { return pipeline.VerifyResult{OK: true} })

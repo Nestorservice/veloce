@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
+	"strconv"
+	"time"
 )
 
 type httpClient struct {
@@ -15,6 +18,24 @@ type httpClient struct {
 	baseURL string // e.g. "https://generativelanguage.googleapis.com/v1beta"
 	apiKey  string
 	http    *http.Client
+	limiter *RateLimiter // shared across flash + pro
+}
+
+// SetRateLimiter wires the shared limiter so the client throttles itself.
+func (c *httpClient) SetRateLimiter(l *RateLimiter) { c.limiter = l }
+
+var retryDelayRe = regexp.MustCompile(`"retryDelay"\s*:\s*"(\d+)s"`)
+
+func parseRetryDelay(body string) time.Duration {
+	m := retryDelayRe.FindStringSubmatch(body)
+	if len(m) != 2 {
+		return 0
+	}
+	n, err := strconv.Atoi(m[1])
+	if err != nil {
+		return 0
+	}
+	return time.Duration(n) * time.Second
 }
 
 func (c *httpClient) Name() string { return c.name }
@@ -68,21 +89,53 @@ func (c *httpClient) Complete(ctx context.Context, req CompletionRequest) (*Comp
 		return nil, err
 	}
 	url := fmt.Sprintf("%s/models/%s:generateContent?key=%s", c.baseURL, c.model, c.apiKey)
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
-	if err != nil {
-		return nil, err
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.http.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("gemini request: %w", err)
-	}
-	defer resp.Body.Close()
+	const maxAttempts = 5
+	var (
+		raw    []byte
+		status int
+	)
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if c.limiter != nil {
+			if err := c.limiter.Wait(ctx); err != nil {
+				return nil, err
+			}
+		}
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+		if err != nil {
+			return nil, err
+		}
+		httpReq.Header.Set("Content-Type", "application/json")
 
-	raw, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("gemini %d: %s", resp.StatusCode, string(raw))
+		resp, err := c.http.Do(httpReq)
+		if err != nil {
+			return nil, fmt.Errorf("gemini request: %w", err)
+		}
+		raw, _ = io.ReadAll(resp.Body)
+		resp.Body.Close()
+		status = resp.StatusCode
+
+		if status == 429 || status == 503 {
+			delay := parseRetryDelay(string(raw))
+			if delay == 0 {
+				delay = time.Duration(1<<attempt) * time.Second
+			} else {
+				delay += 2 * time.Second // small buffer
+			}
+			if c.limiter != nil {
+				c.limiter.Penalize(delay)
+			}
+			select {
+			case <-time.After(delay):
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+			continue
+		}
+		break
+	}
+	if status >= 300 {
+		return nil, fmt.Errorf("gemini %d: %s", status, string(raw))
 	}
 	var parsed geminiResp
 	if err := json.Unmarshal(raw, &parsed); err != nil {

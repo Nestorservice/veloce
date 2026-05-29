@@ -17,6 +17,7 @@ type Flags struct {
 	Resume      bool
 	DryRun      bool
 	RunTests    bool
+	RPM         int
 }
 
 // Config is the validated, defaulted runtime configuration.
@@ -29,6 +30,7 @@ type Config struct {
 	Resume      bool
 	DryRun      bool
 	RunTests    bool
+	RPM         int
 }
 
 // Load validates flags, applies defaults, resolves env vars.
@@ -42,6 +44,7 @@ func Load(f Flags) (*Config, error) {
 		Resume:      f.Resume,
 		DryRun:      f.DryRun,
 		RunTests:    f.RunTests,
+		RPM:         f.RPM,
 	}
 	if c.Source == "" {
 		cwd, err := os.Getwd()
@@ -65,6 +68,13 @@ func Load(f Flags) (*Config, error) {
 	}
 	if c.Workers == 0 {
 		c.Workers = 5
+	}
+	if c.RPM == 0 {
+		c.RPM = 5 // safe default = Gemini free-tier limit
+	}
+	// no point running more workers than the rate limit allows
+	if c.Workers > c.RPM {
+		c.Workers = c.RPM
 	}
 	if c.BudgetLimit == 0 {
 		c.BudgetLimit = 5_000_000

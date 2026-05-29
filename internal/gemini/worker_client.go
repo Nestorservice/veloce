@@ -12,3 +12,11 @@ func NewFlashClient(apiKey string) Client {
 		http:    &http.Client{},
 	}
 }
+
+// AttachLimiter wires a shared rate limiter into a client returned by NewFlashClient/NewProClient.
+// No-op if the client is not the built-in HTTP implementation.
+func AttachLimiter(c Client, l *RateLimiter) {
+	if h, ok := c.(*httpClient); ok {
+		h.SetRateLimiter(l)
+	}
+}
