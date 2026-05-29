@@ -18,7 +18,8 @@ func init() {
 		Use:   "retry",
 		Short: "Reset a single file to pending so the next migrate run re-processes it",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			mig, err := state.LoadMigrationState(retryOutput)
+			out := defaultOutputDir(retryOutput)
+			mig, err := state.LoadMigrationState(out)
 			if err != nil {
 				return err
 			}
@@ -33,7 +34,7 @@ func init() {
 			return mig.Save()
 		},
 	}
-	retryCmd.Flags().StringVar(&retryOutput, "output", "./output", "Output directory")
+	retryCmd.Flags().StringVar(&retryOutput, "output", "", "Output directory (default: <cwd>_output)")
 	retryCmd.Flags().StringVar(&retryFile, "file", "", "File path (relative to source) to reset")
 	_ = retryCmd.MarkFlagRequired("file")
 	rootCmd.AddCommand(retryCmd)

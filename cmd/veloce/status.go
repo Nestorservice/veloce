@@ -2,11 +2,25 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
 	"github.com/Nestorservice/veloce/internal/state"
 )
+
+// defaultOutputDir returns <cwd>_output (sibling of cwd) when --output is empty.
+func defaultOutputDir(explicit string) string {
+	if explicit != "" {
+		return explicit
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "./output"
+	}
+	return filepath.Join(filepath.Dir(cwd), filepath.Base(cwd)+"_output")
+}
 
 var statusOutput string
 
@@ -15,11 +29,12 @@ func init() {
 		Use:   "status",
 		Short: "Display migration progress",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			mig, err := state.LoadMigrationState(statusOutput)
+			out := defaultOutputDir(statusOutput)
+			mig, err := state.LoadMigrationState(out)
 			if err != nil {
-				return err
+				return fmt.Errorf("no migration state in %s — run `veloce` first", out)
 			}
-			tu, _ := state.LoadTokenUsage(statusOutput, 0)
+			tu, _ := state.LoadTokenUsage(out, 0)
 			fin, fout, pin, pout := tu.Snapshot()
 			fmt.Printf("Tokens — flash in/out: %d/%d, pro in/out: %d/%d, total: %d\n",
 				fin, fout, pin, pout, tu.Total())
@@ -39,6 +54,6 @@ func init() {
 			return nil
 		},
 	}
-	statusCmd.Flags().StringVar(&statusOutput, "output", "./output", "Output directory")
+	statusCmd.Flags().StringVar(&statusOutput, "output", "", "Output directory (default: <cwd>_output)")
 	rootCmd.AddCommand(statusCmd)
 }
