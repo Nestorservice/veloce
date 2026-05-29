@@ -1,6 +1,6 @@
-# Build artifacts
-veloce
-veloce.exe
+# Build artifacts (only the binary at repo root)
+/veloce
+/veloce.exe
 *.exe
 dist/
 
