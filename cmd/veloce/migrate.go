@@ -76,8 +76,10 @@ func runMigrate(cmd *cobra.Command, args []string) error {
 
 	var mig *state.MigrationState
 	if cfg.Resume {
-		if mig, err = state.LoadMigrationState(cfg.Output); err != nil {
-			return fmt.Errorf("resume: %w", err)
+		mig, err = state.LoadMigrationState(cfg.Output)
+		if err != nil {
+			// no prior run yet — start fresh
+			mig = state.NewMigrationState(cfg.Output)
 		}
 	} else {
 		mig = state.NewMigrationState(cfg.Output)
