@@ -24,7 +24,17 @@ type httpClient struct {
 // SetRateLimiter wires the shared limiter so the client throttles itself.
 func (c *httpClient) SetRateLimiter(l *RateLimiter) { c.limiter = l }
 
-var retryDelayRe = regexp.MustCompile(`"retryDelay"\s*:\s*"(\d+)s"`)
+var (
+	retryDelayRe = regexp.MustCompile(`"retryDelay"\s*:\s*"(\d+)s"`)
+	perDayQuota  = regexp.MustCompile(`PerDay|RequestsPerDay`)
+)
+
+// ErrDailyQuotaExceeded signals a per-day quota hit — retries won't help today.
+type ErrDailyQuotaExceeded struct{ Body string }
+
+func (e *ErrDailyQuotaExceeded) Error() string {
+	return "gemini daily free-tier quota exhausted — retry tomorrow or enable billing"
+}
 
 func parseRetryDelay(body string) time.Duration {
 	m := retryDelayRe.FindStringSubmatch(body)
@@ -116,11 +126,14 @@ func (c *httpClient) Complete(ctx context.Context, req CompletionRequest) (*Comp
 		status = resp.StatusCode
 
 		if status == 429 || status == 503 {
+			if perDayQuota.MatchString(string(raw)) {
+				return nil, &ErrDailyQuotaExceeded{Body: string(raw)}
+			}
 			delay := parseRetryDelay(string(raw))
 			if delay == 0 {
 				delay = time.Duration(1<<attempt) * time.Second
 			} else {
-				delay += 2 * time.Second // small buffer
+				delay += 2 * time.Second
 			}
 			if c.limiter != nil {
 				c.limiter.Penalize(delay)

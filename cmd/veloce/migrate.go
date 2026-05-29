@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"time"
@@ -135,7 +136,11 @@ func runMigrate(cmd *cobra.Command, args []string) error {
 		CachedID:    cacheID,
 	}
 
+	var dailyQuotaHit bool
 	processFn := func(ctx context.Context, f scanner.File) error {
+		if dailyQuotaHit {
+			return fmt.Errorf("daily quota exceeded")
+		}
 		if tu.Exceeded() {
 			return fmt.Errorf("budget exhausted")
 		}
@@ -151,6 +156,12 @@ func runMigrate(cmd *cobra.Command, args []string) error {
 		_ = tu.Save()
 		dur := time.Since(t0).Round(100 * time.Millisecond)
 		if err != nil {
+			var daily *gemini.ErrDailyQuotaExceeded
+			if errors.As(err, &daily) {
+				dailyQuotaHit = true
+				fmt.Printf("  %s  %s\n", paint(cPink+cBold, "✗ quota  "), paint(cPink, f.RelPath+" — daily free-tier quota hit"))
+				return err
+			}
 			fmt.Printf("  %s  %s  %s\n", paint(cPink+cBold, "✗ fail   "), paint(cDim+cGray, dur.String()), paint(cPink, f.RelPath+" — "+err.Error()))
 		} else {
 			fmt.Printf("  %s  %s  %s\n", paint(cGreen, "✓ done   "), paint(cDim+cGray, dur.String()), paint(cWhite, f.RelPath))
@@ -187,5 +198,15 @@ func runMigrate(cmd *cobra.Command, args []string) error {
 	fin, fout, pin, pout := tu.Snapshot()
 	log.Printf("Done. Tokens flash=%d/%d pro=%d/%d total=%d",
 		fin, fout, pin, pout, tu.Total())
+
+	if dailyQuotaHit {
+		fmt.Println()
+		fmt.Println(paint(cYellow+cBold, "⚠  Daily free-tier quota exhausted (Gemini gives 20 requests/day on free)."))
+		fmt.Println(paint(cWhite, "   Your progress is saved. You have two options:"))
+		fmt.Println(paint(cGreen, "   1. ") + paint(cWhite, "Wait until tomorrow — re-run `veloce` and it resumes automatically."))
+		fmt.Println(paint(cGreen, "   2. ") + paint(cWhite, "Enable billing in Google Cloud (Tier 1 = 1000 req/min, 1M tokens/day free)."))
+		fmt.Println(paint(cDim+cGray, "      https://aistudio.google.com/apikey  →  Set up billing"))
+		fmt.Println(paint(cDim+cGray, "      Then re-run with: veloce --rpm 1000 --workers 10"))
+	}
 	return nil
 }
