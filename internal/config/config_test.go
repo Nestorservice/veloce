@@ -2,19 +2,34 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 )
+
+func laravelDir(t *testing.T) string {
+	t.Helper()
+	d := t.TempDir()
+	if err := os.WriteFile(filepath.Join(d, "composer.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(d, "app"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return d
+}
 
 func TestLoad_DefaultsApplied(t *testing.T) {
 	os.Setenv("GEMINI_API_KEY", "key-from-env")
 	defer os.Unsetenv("GEMINI_API_KEY")
 
-	c, err := Load(Flags{Source: "./src", Output: ""})
+	src := laravelDir(t)
+	c, err := Load(Flags{Source: src, Output: ""})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if c.Output != "./output" {
-		t.Errorf("Output default = %q, want ./output", c.Output)
+	wantOut := filepath.Join(filepath.Dir(src), filepath.Base(src)+"_output")
+	if c.Output != wantOut {
+		t.Errorf("Output default = %q, want %q", c.Output, wantOut)
 	}
 	if c.Workers != 5 {
 		t.Errorf("Workers default = %d, want 5", c.Workers)
@@ -27,15 +42,17 @@ func TestLoad_DefaultsApplied(t *testing.T) {
 	}
 }
 
-func TestLoad_MissingSourceErrors(t *testing.T) {
-	if _, err := Load(Flags{}); err == nil {
-		t.Fatal("expected error for missing --source")
+func TestLoad_NotLaravelErrors(t *testing.T) {
+	os.Setenv("GEMINI_API_KEY", "k")
+	defer os.Unsetenv("GEMINI_API_KEY")
+	if _, err := Load(Flags{Source: t.TempDir()}); err == nil {
+		t.Fatal("expected error for non-Laravel dir")
 	}
 }
 
 func TestLoad_MissingAPIKeyErrors(t *testing.T) {
 	os.Unsetenv("GEMINI_API_KEY")
-	if _, err := Load(Flags{Source: "./src"}); err == nil {
+	if _, err := Load(Flags{Source: laravelDir(t)}); err == nil {
 		t.Fatal("expected error for missing API key")
 	}
 }

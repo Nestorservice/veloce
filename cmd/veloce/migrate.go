@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/nestor/veloce/internal/agent"
 	"github.com/nestor/veloce/internal/config"
@@ -18,21 +18,34 @@ import (
 
 var migrateFlags config.Flags
 
+func phaseBreakdown(files []scanner.File) string {
+	counts := map[int]int{}
+	for _, f := range files {
+		counts[f.Phase]++
+	}
+	return fmt.Sprintf("P1=%d P2=%d P3=%d P4=%d", counts[1], counts[2], counts[3], counts[4])
+}
+
+func registerMigrateFlags(flags *pflag.FlagSet) {
+	flags.StringVar(&migrateFlags.Source, "source", "", "Path to Laravel project (default: current directory)")
+	flags.StringVar(&migrateFlags.Output, "output", "", "Output path (default: <project>_output next to source)")
+	flags.IntVar(&migrateFlags.Workers, "workers", 5, "Worker pool size per phase")
+	flags.IntVar(&migrateFlags.BudgetLimit, "budget", 5_000_000, "Token budget (kill switch)")
+	flags.StringVar(&migrateFlags.APIKey, "api-key", "", "Gemini API key (or $GEMINI_API_KEY)")
+	flags.BoolVar(&migrateFlags.Resume, "resume", true, "Resume from last checkpoint if present")
+	flags.BoolVar(&migrateFlags.DryRun, "dry-run", false, "Skip API + writes (analysis only)")
+	flags.BoolVar(&migrateFlags.RunTests, "run-tests", false, "Run go test / flutter test after each file")
+}
+
 func init() {
+	registerMigrateFlags(rootCmd.Flags())
+
 	migrateCmd := &cobra.Command{
 		Use:   "migrate",
-		Short: "Migrate a Laravel project to Go + Flutter",
+		Short: "Migrate a Laravel project to Go + Flutter (same as running `veloce` with no args)",
 		RunE:  runMigrate,
 	}
-	migrateCmd.Flags().StringVar(&migrateFlags.Source, "source", "", "Path to Laravel project (required)")
-	migrateCmd.Flags().StringVar(&migrateFlags.Output, "output", "./output", "Output monorepo path")
-	migrateCmd.Flags().IntVar(&migrateFlags.Workers, "workers", 5, "Worker pool size per phase")
-	migrateCmd.Flags().IntVar(&migrateFlags.BudgetLimit, "budget", 5_000_000, "Token budget (kill switch)")
-	migrateCmd.Flags().StringVar(&migrateFlags.APIKey, "api-key", "", "Gemini API key (or $GEMINI_API_KEY)")
-	migrateCmd.Flags().BoolVar(&migrateFlags.Resume, "resume", false, "Resume from last checkpoint")
-	migrateCmd.Flags().BoolVar(&migrateFlags.DryRun, "dry-run", false, "Skip API + writes")
-	migrateCmd.Flags().BoolVar(&migrateFlags.RunTests, "run-tests", false, "Run go test / flutter test after each file")
-
+	registerMigrateFlags(migrateCmd.Flags())
 	rootCmd.AddCommand(migrateCmd)
 }
 
@@ -46,7 +59,23 @@ func runMigrate(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("scan: %w", err)
 	}
-	log.Printf("scanner: %d files classified", len(files))
+
+	fmt.Println("┌─ Veloce ──────────────────────────────────────────────")
+	fmt.Printf("│ Source : %s\n", cfg.Source)
+	fmt.Printf("│ Output : %s\n", cfg.Output)
+	fmt.Printf("│ Files  : %d  (%s)\n", len(files), phaseBreakdown(files))
+	fmt.Printf("│ Budget : %d tokens (~$%.2f max)\n", cfg.BudgetLimit, float64(cfg.BudgetLimit)*0.075/1_000_000)
+	if cfg.DryRun {
+		fmt.Println("│ Mode   : DRY-RUN (no API calls, no writes)")
+	}
+	fmt.Println("└───────────────────────────────────────────────────────")
+
+	if cfg.DryRun {
+		for _, f := range files {
+			fmt.Printf("  phase %d  %-7s  %s\n", f.Phase, f.Kind, f.RelPath)
+		}
+		return nil
+	}
 
 	var mig *state.MigrationState
 	if cfg.Resume {
@@ -69,10 +98,7 @@ func runMigrate(cmd *cobra.Command, args []string) error {
 	flash := gemini.NewFlashClient(cfg.APIKey)
 	pro := gemini.NewProClient(cfg.APIKey)
 
-	rules, err := os.ReadFile("configs/default_rules.md")
-	if err != nil {
-		return fmt.Errorf("read default_rules: %w", err)
-	}
+	rules := []byte(embeddedRules)
 
 	cm := gemini.NewCacheManager(cfg.APIKey, cfg.Output)
 	cacheID, _ := cm.LoadCacheID()

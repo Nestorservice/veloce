@@ -10,20 +10,37 @@ See `docs/superpowers/specs/2026-05-29-migration-agent-design.md` for the full d
 go build -o veloce ./cmd/veloce
 ```
 
-## Usage
+## Install (global)
+
+```bash
+go install github.com/nestor/veloce/cmd/veloce@latest   # → $GOPATH/bin/veloce
+```
+
+## Usage — version courte (le mode normal)
 
 ```bash
 export GEMINI_API_KEY=...
 
-./veloce migrate \
-  --source  ./my-laravel-project \
-  --output  ./output \
+cd /chemin/vers/mon-projet-laravel
+veloce                       # c'est tout
+```
+
+Veloce détecte le projet Laravel, écrit dans `../mon-projet-laravel_output/`, reprend automatiquement où il s'était arrêté si tu relances.
+
+```bash
+veloce --dry-run             # analyse seulement, zéro appel API
+veloce status                # progression
+veloce retry --file app/Models/User.php
+```
+
+## Usage — flags avancés
+
+```bash
+veloce \
+  --source  ./my-laravel-project \   # défaut: dossier courant
+  --output  ./custom-out \           # défaut: <source>_output
   --workers 8 \
   --budget  5000000
-
-./veloce status --output ./output
-./veloce retry  --output ./output --file app/Models/User.php
-./veloce migrate --source ./my-laravel-project --output ./output --resume
 ```
 
 ### Flags (`migrate`)

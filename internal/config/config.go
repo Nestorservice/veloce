@@ -2,7 +2,9 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"os"
+	"path/filepath"
 )
 
 // Flags is the raw set of CLI flag values.
@@ -31,10 +33,6 @@ type Config struct {
 
 // Load validates flags, applies defaults, resolves env vars.
 func Load(f Flags) (*Config, error) {
-	if f.Source == "" {
-		return nil, errors.New("--source is required")
-	}
-
 	c := &Config{
 		Source:      f.Source,
 		Output:      f.Output,
@@ -45,8 +43,25 @@ func Load(f Flags) (*Config, error) {
 		DryRun:      f.DryRun,
 		RunTests:    f.RunTests,
 	}
+	if c.Source == "" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return nil, fmt.Errorf("getwd: %w", err)
+		}
+		c.Source = cwd
+	}
+	abs, err := filepath.Abs(c.Source)
+	if err != nil {
+		return nil, fmt.Errorf("resolve source: %w", err)
+	}
+	c.Source = abs
+	if !looksLikeLaravel(c.Source) {
+		return nil, fmt.Errorf("not a Laravel project: %s (missing composer.json/artisan/app/)", c.Source)
+	}
 	if c.Output == "" {
-		c.Output = "./output"
+		parent := filepath.Dir(c.Source)
+		name := filepath.Base(c.Source)
+		c.Output = filepath.Join(parent, name+"_output")
 	}
 	if c.Workers == 0 {
 		c.Workers = 5
@@ -62,3 +77,15 @@ func Load(f Flags) (*Config, error) {
 	}
 	return c, nil
 }
+
+func looksLikeLaravel(dir string) bool {
+	hits := 0
+	for _, marker := range []string{"composer.json", "artisan", "app", "routes", "config"} {
+		if _, err := os.Stat(filepath.Join(dir, marker)); err == nil {
+			hits++
+		}
+	}
+	return hits >= 2
+}
+
+var ErrNotLaravel = errors.New("not a Laravel project")
