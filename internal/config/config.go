@@ -59,7 +59,7 @@ func Load(f Flags) (*Config, error) {
 	}
 	c.Source = abs
 	if !looksLikeLaravel(c.Source) {
-		return nil, fmt.Errorf("not a Laravel project: %s (missing composer.json/artisan/app/)", c.Source)
+		return nil, fmt.Errorf("%w: %s (missing composer.json/artisan/app/)", ErrNotLaravel, c.Source)
 	}
 	if c.Output == "" {
 		parent := filepath.Dir(c.Source)
@@ -83,7 +83,7 @@ func Load(f Flags) (*Config, error) {
 		c.APIKey = os.Getenv("GEMINI_API_KEY")
 	}
 	if c.APIKey == "" && !c.DryRun {
-		return nil, errors.New("API key required: pass --api-key or set GEMINI_API_KEY")
+		return nil, ErrMissingAPIKey
 	}
 	return c, nil
 }
@@ -98,4 +98,7 @@ func looksLikeLaravel(dir string) bool {
 	return hits >= 2
 }
 
-var ErrNotLaravel = errors.New("not a Laravel project")
+var (
+	ErrNotLaravel    = errors.New("not a Laravel project")
+	ErrMissingAPIKey = errors.New("API key required: pass --api-key or set GEMINI_API_KEY")
+)

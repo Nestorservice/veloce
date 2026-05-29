@@ -55,7 +55,11 @@ func init() {
 func runMigrate(cmd *cobra.Command, args []string) error {
 	cfg, err := config.Load(migrateFlags)
 	if err != nil {
-		PrintHelpfulHint()
+		if errors.Is(err, config.ErrNotLaravel) {
+			PrintHelpfulHint()
+		} else if errors.Is(err, config.ErrMissingAPIKey) {
+			PrintMissingAPIKeyHint()
+		}
 		return err
 	}
 

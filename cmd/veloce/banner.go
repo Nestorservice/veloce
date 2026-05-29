@@ -103,6 +103,25 @@ func PrintRunHeader(source, output string, files int, breakdown string, budget i
 	fmt.Fprintln(w, "└"+strings.Repeat("─", 58)+"┘")
 }
 
+// PrintMissingAPIKeyHint is shown when the Gemini API key is not provided.
+func PrintMissingAPIKeyHint() {
+	w := os.Stdout
+	fmt.Fprintln(w, "  "+paint(cYellow, "ℹ  No Gemini API key found in this session."))
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "  "+paint(cWhite+cBold, "Set it for this PowerShell session:"))
+	fmt.Fprintln(w, "    "+paint(cGreen, `$env:GEMINI_API_KEY = "AIza..."`))
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "  "+paint(cWhite+cBold, "Or make it permanent (Windows):"))
+	fmt.Fprintln(w, "    "+paint(cGreen, `setx GEMINI_API_KEY "AIza..."`)+paint(cDim+cGray, "   # then open a new terminal"))
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "  "+paint(cWhite+cBold, "Or pass it directly:"))
+	fmt.Fprintln(w, "    "+paint(cGreen, "veloce --api-key AIza..."))
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "  "+paint(cDim+cGray, "Get a key: https://aistudio.google.com/apikey"))
+	fmt.Fprintln(w, "  "+paint(cDim+cGray, "Or skip the API entirely with: ")+paint(cCyan, "veloce --dry-run"))
+	fmt.Fprintln(w)
+}
+
 // PrintHelpfulHint is shown when invoked outside a Laravel project.
 func PrintHelpfulHint() {
 	w := os.Stdout
