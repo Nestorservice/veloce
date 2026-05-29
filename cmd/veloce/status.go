@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/nestor/veloce/internal/state"
+	"github.com/Nestorservice/veloce/internal/state"
 )
 
 var statusOutput string

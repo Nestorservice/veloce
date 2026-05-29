@@ -8,12 +8,12 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
-	"github.com/nestor/veloce/internal/agent"
-	"github.com/nestor/veloce/internal/config"
-	"github.com/nestor/veloce/internal/gemini"
-	"github.com/nestor/veloce/internal/pipeline"
-	"github.com/nestor/veloce/internal/scanner"
-	"github.com/nestor/veloce/internal/state"
+	"github.com/Nestorservice/veloce/internal/agent"
+	"github.com/Nestorservice/veloce/internal/config"
+	"github.com/Nestorservice/veloce/internal/gemini"
+	"github.com/Nestorservice/veloce/internal/pipeline"
+	"github.com/Nestorservice/veloce/internal/scanner"
+	"github.com/Nestorservice/veloce/internal/state"
 )
 
 var migrateFlags config.Flags

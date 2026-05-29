@@ -8,11 +8,11 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/nestor/veloce/internal/agent"
-	"github.com/nestor/veloce/internal/gemini"
-	"github.com/nestor/veloce/internal/pipeline"
-	"github.com/nestor/veloce/internal/scanner"
-	"github.com/nestor/veloce/internal/state"
+	"github.com/Nestorservice/veloce/internal/agent"
+	"github.com/Nestorservice/veloce/internal/gemini"
+	"github.com/Nestorservice/veloce/internal/pipeline"
+	"github.com/Nestorservice/veloce/internal/scanner"
+	"github.com/Nestorservice/veloce/internal/state"
 )
 
 type stub struct{ resp string }

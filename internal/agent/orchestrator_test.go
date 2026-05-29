@@ -5,7 +5,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/nestor/veloce/internal/scanner"
+	"github.com/Nestorservice/veloce/internal/scanner"
 )
 
 func TestOrchestrator_RunsPhasesSequentially(t *testing.T) {

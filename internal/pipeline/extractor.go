@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/nestor/veloce/internal/state"
+	"github.com/Nestorservice/veloce/internal/state"
 )
 
 // ExtractGoTypes parses Go source and returns each top-level struct type.

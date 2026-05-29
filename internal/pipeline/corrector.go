@@ -3,7 +3,7 @@ package pipeline
 import (
 	"context"
 
-	"github.com/nestor/veloce/internal/gemini"
+	"github.com/Nestorservice/veloce/internal/gemini"
 )
 
 type VerifyFn func(code string) VerifyResult

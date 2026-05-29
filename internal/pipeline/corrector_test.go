@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nestor/veloce/internal/gemini"
+	"github.com/Nestorservice/veloce/internal/gemini"
 )
 
 type fakeClient struct {

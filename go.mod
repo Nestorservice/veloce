@@ -1,4 +1,4 @@
-module github.com/nestor/veloce
+module github.com/Nestorservice/veloce
 
 go 1.25.1
 

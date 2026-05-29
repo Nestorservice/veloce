@@ -5,7 +5,7 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/nestor/veloce/internal/scanner"
+	"github.com/Nestorservice/veloce/internal/scanner"
 )
 
 type ProcessFn func(ctx context.Context, f scanner.File) error
