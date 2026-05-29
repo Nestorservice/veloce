@@ -52,6 +52,7 @@ func init() {
 func runMigrate(cmd *cobra.Command, args []string) error {
 	cfg, err := config.Load(migrateFlags)
 	if err != nil {
+		PrintHelpfulHint()
 		return err
 	}
 
@@ -60,19 +61,15 @@ func runMigrate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("scan: %w", err)
 	}
 
-	fmt.Println("┌─ Veloce ──────────────────────────────────────────────")
-	fmt.Printf("│ Source : %s\n", cfg.Source)
-	fmt.Printf("│ Output : %s\n", cfg.Output)
-	fmt.Printf("│ Files  : %d  (%s)\n", len(files), phaseBreakdown(files))
-	fmt.Printf("│ Budget : %d tokens (~$%.2f max)\n", cfg.BudgetLimit, float64(cfg.BudgetLimit)*0.075/1_000_000)
-	if cfg.DryRun {
-		fmt.Println("│ Mode   : DRY-RUN (no API calls, no writes)")
-	}
-	fmt.Println("└───────────────────────────────────────────────────────")
+	PrintRunHeader(cfg.Source, cfg.Output, len(files), phaseBreakdown(files), cfg.BudgetLimit, cfg.DryRun)
 
 	if cfg.DryRun {
 		for _, f := range files {
-			fmt.Printf("  phase %d  %-7s  %s\n", f.Phase, f.Kind, f.RelPath)
+			fmt.Printf("  %s  %s  %s\n",
+				paint(cBlue, fmt.Sprintf("phase %d", f.Phase)),
+				paint(cPurple, fmt.Sprintf("%-7s", f.Kind)),
+				paint(cWhite, f.RelPath),
+			)
 		}
 		return nil
 	}
