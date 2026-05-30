@@ -96,7 +96,9 @@ func Load(f Flags) (*Config, error) {
 		c.Delay = 10 // 10s forced pause between batches (free tier safety)
 	}
 	if c.BatchSize == 0 {
-		c.BatchSize = 15
+		// Free-tier DeepSeek context = 65 536 tokens. 5 files × ~2 000 tok/file
+		// input leaves ~55 000 tokens for output — comfortable margin.
+		c.BatchSize = 5
 	}
 	if c.BudgetLimit == 0 {
 		c.BudgetLimit = 5_000_000

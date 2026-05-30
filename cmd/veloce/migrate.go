@@ -111,10 +111,12 @@ func runMigrate(cmd *cobra.Command, args []string) error {
 	openrouter.AttachAppMetadata(worker, "https://github.com/Nestorservice/veloce", "Veloce")
 	openrouter.AttachAppMetadata(architect, "https://github.com/Nestorservice/veloce", "Veloce")
 
-	log.Printf("engine  : OpenRouter — worker=%s  architect=%s", worker.Model(), architect.Model())
-	log.Printf("rate    : %d rpm  delay=%ds  batch-size=%d  workers=%d",
-		cfg.RPM, cfg.Delay, cfg.BatchSize, cfg.Workers)
-	log.Printf("cache   : skipped (OpenRouter doesn't use Gemini caching)")
+	fmt.Printf("  %s %s\n", paint(cGray, "Worker  :"), paint(cCyan, worker.Model()))
+	fmt.Printf("  %s %s\n", paint(cGray, "Planner :"), paint(cPurple, architect.Model()))
+	fmt.Printf("  %s %s rpm  delay=%ds  batch=%d files  workers=%d\n",
+		paint(cGray, "Rate    :"), paint(cWhite, fmt.Sprintf("%d", cfg.RPM)),
+		cfg.Delay, cfg.BatchSize, cfg.Workers)
+	fmt.Println()
 
 	bw := &agent.BatchWorker{
 		OutputRoot:  cfg.Output,
@@ -126,11 +128,18 @@ func runMigrate(cmd *cobra.Command, args []string) error {
 		MaxRetries:  3,
 	}
 
-	// Group into batches per phase (phases run strictly in order).
-	batches, err := batcher.Group(cfg.Source, files, batcher.Options{
+	// For the free-tier DeepSeek model (65 536-token context), we cap both the
+	// token budget and the file count. A 5-file batch at ~1 500 tok/file =
+	// ~7 500 tokens input, leaving ~57 000 for output (~11 000 tok/file of Go
+	// or Dart — plenty for most files). User can override with --batch-size.
+	const freeTierInputCap = 20_000 // ≈ 5 files × avg config/model file
+	batchOpts := batcher.Options{
 		MaxFiles:       cfg.BatchSize,
-		MaxInputTokens: batcher.DefaultMaxInputTokens,
-	})
+		MaxInputTokens: freeTierInputCap,
+	}
+
+	// Group into batches per phase (phases run strictly in order).
+	batches, err := batcher.Group(cfg.Source, files, batchOpts)
 	if err != nil {
 		return fmt.Errorf("batch grouping: %w", err)
 	}

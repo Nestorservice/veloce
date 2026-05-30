@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/Nestorservice/veloce/internal/batcher"
 	"github.com/Nestorservice/veloce/internal/openrouter"
@@ -55,22 +54,43 @@ func (bw *BatchWorker) Process(ctx context.Context, b batcher.Batch) error {
 	}
 
 	prompt := openrouter.BuildBatchPrompt(b)
+
+	// DeepSeek V4 Flash (free) has a 65 536-token context window.
+	// We reserve input tokens + a 1 000-token safety margin and give the rest
+	// to output. We never ask for more than 32 768 tokens of output regardless,
+	// and never less than 4 096 tokens.
+	const modelCtxLimit = 65_536
+	const minOutput = 4_096
+	const maxOutput = 32_768
+	outputBudget := modelCtxLimit - b.InputTokens - 1_000
+	if outputBudget < minOutput {
+		outputBudget = minOutput
+	}
+	if outputBudget > maxOutput {
+		outputBudget = maxOutput
+	}
+
 	req := openrouter.CompletionRequest{
 		SystemRules:     bw.SystemRules,
 		Prompt:          prompt,
-		MaxOutputTokens: 8192 * len(b.Files), // generous ceiling per file
+		MaxOutputTokens: outputBudget,
 	}
 
 	var (
-		parsed []openrouter.ParsedFile
-		resp   *openrouter.CompletionResponse
+		parsed  []openrouter.ParsedFile
+		resp    *openrouter.CompletionResponse
 		lastErr error
 	)
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		// First attempt: Worker; on failure escalate to Architect.
+		// Strategy:
+		//   • Attempts 1-2: always use Worker (DeepSeek). The HTTP client
+		//     already handles 429 / 503 retries internally with back-off.
+		//     We only come back here for quality failures (no parseable output).
+		//   • Attempt 3 (final): escalate to Architect (Llama) as a last resort
+		//     for persistent quality failures.
 		client := bw.Worker
-		if attempt > 1 {
+		if attempt == maxRetries && attempt > 1 {
 			client = bw.Architect
 		}
 
@@ -81,17 +101,15 @@ func (bw *BatchWorker) Process(ctx context.Context, b batcher.Batch) error {
 				bw.markAllFailed(b, lastErr.Error())
 				return ErrDailyQuota
 			}
-			// Transient error — wait briefly then retry.
-			select {
-			case <-time.After(5 * time.Second):
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-			continue
+			// Transient error that survived all HTTP-level retries.
+			// Log it and give up on this batch (don't loop back — the HTTP
+			// client already exhausted its own retry budget).
+			bw.markAllFailed(b, fmt.Sprintf("API error on attempt %d: %v", attempt, lastErr))
+			return lastErr
 		}
 
-		// Track token usage (Worker = Flash equivalent; Architect = Pro equivalent).
-		if attempt == 1 {
+		// Track token usage.
+		if client == bw.Worker {
 			bw.TokenUsage.AddFlash(resp.InputTokens, resp.OutputTokens)
 		} else {
 			bw.TokenUsage.AddPro(resp.InputTokens, resp.OutputTokens)
@@ -100,10 +118,10 @@ func (bw *BatchWorker) Process(ctx context.Context, b batcher.Batch) error {
 		// Parse the multi-file response.
 		parsed = openrouter.ParseBatchResponse(resp.Text)
 		if len(parsed) > 0 {
-			break
+			break // success
 		}
-		// Empty parse on first attempt → retry with Architect.
-		lastErr = fmt.Errorf("model returned no parseable output files (attempt %d)", attempt)
+		// No parseable output → quality failure, retry (possibly with Architect).
+		lastErr = fmt.Errorf("model returned no parseable output files (attempt %d/%d)", attempt, maxRetries)
 	}
 
 	if len(parsed) == 0 {

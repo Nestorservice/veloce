@@ -37,8 +37,8 @@ func TestLoad_DefaultsApplied(t *testing.T) {
 	if c.RPM != 10 {
 		t.Errorf("RPM = %d, want 10", c.RPM)
 	}
-	if c.BatchSize != 15 {
-		t.Errorf("BatchSize = %d, want 15", c.BatchSize)
+	if c.BatchSize != 5 {
+		t.Errorf("BatchSize = %d, want 5 (free-tier default)", c.BatchSize)
 	}
 	if c.Delay != 10 {
 		t.Errorf("Delay = %d, want 10", c.Delay)
