@@ -5,15 +5,16 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"sort"
 	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
 	"github.com/Nestorservice/veloce/internal/agent"
+	"github.com/Nestorservice/veloce/internal/batcher"
 	"github.com/Nestorservice/veloce/internal/config"
-	"github.com/Nestorservice/veloce/internal/gemini"
-	"github.com/Nestorservice/veloce/internal/pipeline"
+	"github.com/Nestorservice/veloce/internal/openrouter"
 	"github.com/Nestorservice/veloce/internal/scanner"
 	"github.com/Nestorservice/veloce/internal/state"
 )
@@ -31,13 +32,14 @@ func phaseBreakdown(files []scanner.File) string {
 func registerMigrateFlags(flags *pflag.FlagSet) {
 	flags.StringVar(&migrateFlags.Source, "source", "", "Path to Laravel project (default: current directory)")
 	flags.StringVar(&migrateFlags.Output, "output", "", "Output path (default: <project>_output next to source)")
-	flags.IntVar(&migrateFlags.Workers, "workers", 5, "Worker pool size per phase")
-	flags.IntVar(&migrateFlags.BudgetLimit, "budget", 5_000_000, "Token budget (kill switch)")
-	flags.StringVar(&migrateFlags.APIKey, "api-key", "", "Gemini API key (or $GEMINI_API_KEY)")
+	flags.IntVar(&migrateFlags.Workers, "workers", 0, "Parallel batch workers (default: 3)")
+	flags.StringVar(&migrateFlags.APIKey, "api-key", "", "OpenRouter API key (or $OPENROUTER_API_KEY)")
 	flags.BoolVar(&migrateFlags.Resume, "resume", true, "Resume from last checkpoint if present")
-	flags.BoolVar(&migrateFlags.DryRun, "dry-run", false, "Skip API + writes (analysis only)")
-	flags.BoolVar(&migrateFlags.RunTests, "run-tests", false, "Run go test / flutter test after each file")
-	flags.IntVar(&migrateFlags.RPM, "rpm", 0, "Max requests/min to Gemini (default: 5 — Gemini free tier)")
+	flags.BoolVar(&migrateFlags.DryRun, "dry-run", false, "Scan only — no API calls, no writes")
+	flags.BoolVar(&migrateFlags.RunTests, "run-tests", false, "Run go test / flutter test after each batch")
+	flags.IntVar(&migrateFlags.RPM, "rpm", 0, "Max API requests/min (default: 10 — OpenRouter free tier)")
+	flags.IntVar(&migrateFlags.Delay, "delay", 0, "Forced pause in seconds between batches (default: 10)")
+	flags.IntVar(&migrateFlags.BatchSize, "batch-size", 0, "Max files per batch (default: 15)")
 }
 
 func init() {
@@ -63,32 +65,29 @@ func runMigrate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Scan.
 	files, err := scanner.Scan(cfg.Source)
 	if err != nil {
 		return fmt.Errorf("scan: %w", err)
 	}
 
+	// Header.
 	PrintRunHeader(cfg.Source, cfg.Output, len(files), phaseBreakdown(files), cfg.BudgetLimit, cfg.DryRun)
 
 	if cfg.DryRun {
 		for _, f := range files {
 			fmt.Printf("  %s  %s  %s\n",
 				paint(cBlue, fmt.Sprintf("phase %d", f.Phase)),
-				paint(cPurple, fmt.Sprintf("%-7s", f.Kind)),
+				paint(cPurple, fmt.Sprintf("%-10s", f.Kind)),
 				paint(cWhite, f.RelPath),
 			)
 		}
 		return nil
 	}
 
-	var mig *state.MigrationState
-	if cfg.Resume {
-		mig, err = state.LoadMigrationState(cfg.Output)
-		if err != nil {
-			// no prior run yet — start fresh
-			mig = state.NewMigrationState(cfg.Output)
-		}
-	} else {
+	// State.
+	mig, err := state.LoadMigrationState(cfg.Output)
+	if err != nil {
 		mig = state.NewMigrationState(cfg.Output)
 	}
 	mig.SetTotalFiles(len(files))
@@ -98,119 +97,185 @@ func runMigrate(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	st, _ := state.LoadSharedTypes(cfg.Output)
-	tu, _ := state.LoadTokenUsage(cfg.Output, cfg.BudgetLimit)
-
-	flash := gemini.NewFlashClient(cfg.APIKey)
-	pro := gemini.NewProClient(cfg.APIKey)
-	limiter := gemini.NewRateLimiter(cfg.RPM)
-	gemini.AttachLimiter(flash, limiter)
-	gemini.AttachLimiter(pro, limiter)
-	log.Printf("rate limit: %d req/min (use --rpm to override)", cfg.RPM)
-
-	rules := []byte(embeddedRules)
-
-	cm := gemini.NewCacheManager(cfg.APIKey, cfg.Output)
-	cacheID, _ := cm.LoadCacheID()
-	// Gemini requires >= 1024 tokens for cache creation (roughly 4 KB of text).
-	const minCacheBytes = 4500
-	cacheable := len(rules)+len(st.RenderForPrompt()) >= minCacheBytes
-	if cacheID == "" && !cfg.DryRun && cacheable {
-		cacheID, err = cm.EnsureCache(string(rules), st.RenderForPrompt())
-		if err != nil {
-			log.Printf("cache create failed (continuing without cache): %v", err)
-			cacheID = ""
-		}
-	} else if !cacheable {
-		log.Printf("cache skipped: payload too small (Gemini requires ≥1024 tokens)")
+	tu, err := state.LoadTokenUsage(cfg.Output, cfg.BudgetLimit)
+	if err != nil {
+		tu = state.NewTokenUsage(cfg.Output, cfg.BudgetLimit)
 	}
 
-	corrector := pipeline.NewCorrector(flash, pro, func(string) pipeline.VerifyResult { return pipeline.VerifyResult{OK: true} })
+	// API clients (OpenRouter).
+	worker := openrouter.NewWorkerClient(cfg.APIKey)
+	architect := openrouter.NewArchitectClient(cfg.APIKey)
+	limiter := openrouter.NewRateLimiter(cfg.RPM, time.Duration(cfg.Delay)*time.Second)
+	openrouter.AttachLimiter(worker, limiter)
+	openrouter.AttachLimiter(architect, limiter)
+	openrouter.AttachAppMetadata(worker, "https://github.com/Nestorservice/veloce", "Veloce")
+	openrouter.AttachAppMetadata(architect, "https://github.com/Nestorservice/veloce", "Veloce")
 
-	worker := &agent.Worker{
-		SourceRoot:  cfg.Source,
+	log.Printf("engine  : OpenRouter — worker=%s  architect=%s", worker.Model(), architect.Model())
+	log.Printf("rate    : %d rpm  delay=%ds  batch-size=%d  workers=%d",
+		cfg.RPM, cfg.Delay, cfg.BatchSize, cfg.Workers)
+	log.Printf("cache   : skipped (OpenRouter doesn't use Gemini caching)")
+
+	bw := &agent.BatchWorker{
 		OutputRoot:  cfg.Output,
-		Flash:       flash,
-		Pro:         pro,
-		Corrector:   corrector,
+		Worker:      worker,
+		Architect:   architect,
 		Migration:   mig,
-		SharedTypes: st,
 		TokenUsage:  tu,
-		SystemRules: string(rules),
-		CachedID:    cacheID,
+		SystemRules: embeddedRules,
+		MaxRetries:  3,
 	}
 
-	var dailyQuotaHit bool
-	processFn := func(ctx context.Context, f scanner.File) error {
-		if dailyQuotaHit {
-			return fmt.Errorf("daily quota exceeded")
-		}
-		if tu.Exceeded() {
-			return fmt.Errorf("budget exhausted")
-		}
-		if entry, ok := mig.Get(f.RelPath); ok && entry.Status == state.StatusDone {
-			fmt.Printf("  %s  %s  %s\n", paint(cGreen, "✓ done   "), paint(cDim+cGray, "(cached)"), paint(cDim+cGray, f.RelPath))
-			return nil
-		}
-		fmt.Printf("  %s  %s\n", paint(cYellow, "→ start  "), paint(cWhite, f.RelPath))
-		t0 := time.Now()
-		err := worker.Process(ctx, f)
-		_ = mig.Save()
-		_ = st.Save()
-		_ = tu.Save()
-		dur := time.Since(t0).Round(100 * time.Millisecond)
-		if err != nil {
-			var daily *gemini.ErrDailyQuotaExceeded
-			if errors.As(err, &daily) {
-				dailyQuotaHit = true
-				fmt.Printf("  %s  %s\n", paint(cPink+cBold, "✗ quota  "), paint(cPink, f.RelPath+" — daily free-tier quota hit"))
-				return err
-			}
-			fmt.Printf("  %s  %s  %s\n", paint(cPink+cBold, "✗ fail   "), paint(cDim+cGray, dur.String()), paint(cPink, f.RelPath+" — "+err.Error()))
-		} else {
-			fmt.Printf("  %s  %s  %s\n", paint(cGreen, "✓ done   "), paint(cDim+cGray, dur.String()), paint(cWhite, f.RelPath))
-		}
-		return err
+	// Group into batches per phase (phases run strictly in order).
+	batches, err := batcher.Group(cfg.Source, files, batcher.Options{
+		MaxFiles:       cfg.BatchSize,
+		MaxInputTokens: batcher.DefaultMaxInputTokens,
+	})
+	if err != nil {
+		return fmt.Errorf("batch grouping: %w", err)
 	}
 
-	orch := &agent.Orchestrator{
-		Files:       files,
-		Workers:     cfg.Workers,
-		ProcessFn:   processFn,
-		BudgetCheck: tu.Exceeded,
-		OnPhaseStart: func(p int, n int) {
-			fmt.Println()
-			fmt.Println(paint(cBlue+cBold, fmt.Sprintf("▶ Phase %d  —  %d file(s) to process", p, n)))
-		},
-		OnPhaseEnd: func(p int) {
-			_ = mig.Save()
-			_ = st.Save()
-			_ = tu.Save()
-			fmt.Println(paint(cGreen+cBold, fmt.Sprintf("✓ Phase %d complete", p)))
-		},
-	}
+	// Sort batches by phase.
+	sort.Slice(batches, func(i, j int) bool { return batches[i].Phase < batches[j].Phase })
 
 	ctx := context.Background()
-	if err := orch.Run(ctx); err != nil {
-		log.Printf("orchestrator: %v", err)
+	dailyQuotaHit := false
+	currentPhase := 0
+	totalBatches := len(batches)
+	doneBatches := 0
+
+	for _, b := range batches {
+		if dailyQuotaHit {
+			break
+		}
+
+		// Phase transition banner.
+		if b.Phase != currentPhase {
+			if currentPhase != 0 {
+				fmt.Println(paint(cGreen+cBold, fmt.Sprintf("✓ Phase %d complete", currentPhase)))
+			}
+			currentPhase = b.Phase
+			phaseBatches := countBatchesInPhase(batches, currentPhase)
+			fmt.Println()
+			fmt.Println(paint(cBlue+cBold,
+				fmt.Sprintf("▶ Phase %d  —  %d batch(es) / %d file(s)",
+					currentPhase, phaseBatches, countFilesInPhase(files, currentPhase))))
+		}
+
+		// Skip already-done batches.
+		if allDone(mig, b) {
+			doneBatches++
+			fmt.Printf("  %s  %s  %s\n",
+				paint(cGreen, "✓ cached "),
+				paint(cDim+cGray, fmt.Sprintf("[%d/%d]", doneBatches, totalBatches)),
+				paint(cDim+cGray, fmt.Sprintf("%s (%d files)", b.ID, len(b.Files))),
+			)
+			continue
+		}
+
+		doneBatches++
+		fmt.Printf("  %s  %s  %s\n",
+			paint(cYellow, "→ batch  "),
+			paint(cDim+cGray, fmt.Sprintf("[%d/%d]", doneBatches, totalBatches)),
+			paint(cWhite, fmt.Sprintf("%s  (%d files, ~%d tokens)", b.ID, len(b.Files), b.InputTokens)),
+		)
+
+		t0 := time.Now()
+		err := bw.Process(ctx, b)
+		dur := time.Since(t0).Round(100 * time.Millisecond)
+
+		_ = mig.Save()
+		_ = tu.Save()
+
+		if err != nil {
+			if errors.Is(err, agent.ErrDailyQuota) {
+				dailyQuotaHit = true
+				fmt.Printf("  %s  %s\n",
+					paint(cPink+cBold, "✗ quota  "),
+					paint(cPink, "daily free-tier quota exhausted"),
+				)
+				break
+			}
+			fmt.Printf("  %s  %s  %s\n",
+				paint(cPink, "✗ fail   "),
+				paint(cDim+cGray, dur.String()),
+				paint(cPink, err.Error()),
+			)
+			continue
+		}
+
+		// Count how many source files were actually written.
+		written := countDone(mig, b)
+		fmt.Printf("  %s  %s  %s\n",
+			paint(cGreen, "✓ done   "),
+			paint(cDim+cGray, dur.String()),
+			paint(cWhite, fmt.Sprintf("%d/%d files written", written, len(b.Files))),
+		)
 	}
 
-	_ = mig.Save()
-	_ = st.Save()
-	_ = tu.Save()
+	if currentPhase != 0 && !dailyQuotaHit {
+		fmt.Println(paint(cGreen+cBold, fmt.Sprintf("✓ Phase %d complete", currentPhase)))
+	}
 
 	fin, fout, pin, pout := tu.Snapshot()
-	log.Printf("Done. Tokens flash=%d/%d pro=%d/%d total=%d",
+	fmt.Println()
+	log.Printf("Done. Tokens worker=%d/%d  architect=%d/%d  total=%d",
 		fin, fout, pin, pout, tu.Total())
 
 	if dailyQuotaHit {
-		fmt.Println()
-		fmt.Println(paint(cYellow+cBold, "⚠  Daily free-tier quota exhausted (Gemini gives 20 requests/day on free)."))
-		fmt.Println(paint(cWhite, "   Your progress is saved. You have two options:"))
-		fmt.Println(paint(cGreen, "   1. ") + paint(cWhite, "Wait until tomorrow — re-run `veloce` and it resumes automatically."))
-		fmt.Println(paint(cGreen, "   2. ") + paint(cWhite, "Enable billing in Google Cloud (Tier 1 = 1000 req/min, 1M tokens/day free)."))
-		fmt.Println(paint(cDim+cGray, "      https://aistudio.google.com/apikey  →  Set up billing"))
-		fmt.Println(paint(cDim+cGray, "      Then re-run with: veloce --rpm 1000 --workers 10"))
+		printDailyQuotaHint(cfg)
 	}
 	return nil
+}
+
+// ---- helpers ---------------------------------------------------------------
+
+func allDone(mig *state.MigrationState, b batcher.Batch) bool {
+	for _, f := range b.Files {
+		e, ok := mig.Get(f.RelPath)
+		if !ok || e.Status != state.StatusDone {
+			return false
+		}
+	}
+	return true
+}
+
+func countDone(mig *state.MigrationState, b batcher.Batch) int {
+	n := 0
+	for _, f := range b.Files {
+		if e, ok := mig.Get(f.RelPath); ok && e.Status == state.StatusDone {
+			n++
+		}
+	}
+	return n
+}
+
+func countBatchesInPhase(batches []batcher.Batch, phase int) int {
+	n := 0
+	for _, b := range batches {
+		if b.Phase == phase {
+			n++
+		}
+	}
+	return n
+}
+
+func countFilesInPhase(files []scanner.File, phase int) int {
+	n := 0
+	for _, f := range files {
+		if f.Phase == phase {
+			n++
+		}
+	}
+	return n
+}
+
+func printDailyQuotaHint(_ *config.Config) {
+	fmt.Println()
+	fmt.Println(paint(cYellow+cBold, "⚠  Daily free-tier quota exhausted (OpenRouter ~200 requests/day)."))
+	fmt.Println(paint(cWhite, "   Your progress is saved — re-run `veloce` tomorrow to continue."))
+	fmt.Println()
+	fmt.Println(paint(cWhite+cBold, "   Or top up OpenRouter ($5 gets ~10 000 requests):"))
+	fmt.Println(paint(cGreen, "   https://openrouter.ai/credits"))
+	fmt.Println(paint(cDim+cGray, "   Then re-run with: veloce --rpm 200 --workers 10 --delay 1"))
 }

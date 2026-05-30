@@ -72,7 +72,7 @@ func PrintSplash() {
 	tagline := "Laravel  →  Go + Flutter  migration agent"
 	fmt.Fprintln(w, "  "+paint(cWhite+cBold, tagline))
 
-	sub := "Powered by Gemini 2.5  ·  ReAct loop  ·  Per-file checkpoints"
+	sub := "Powered by OpenRouter  ·  Batch processing  ·  Per-file checkpoints"
 	fmt.Fprintln(w, "  "+paint(cGray, sub))
 	fmt.Fprintln(w)
 
@@ -103,22 +103,27 @@ func PrintRunHeader(source, output string, files int, breakdown string, budget i
 	fmt.Fprintln(w, "└"+strings.Repeat("─", 58)+"┘")
 }
 
-// PrintMissingAPIKeyHint is shown when the Gemini API key is not provided.
+// PrintMissingAPIKeyHint is shown when the OpenRouter API key is not provided.
 func PrintMissingAPIKeyHint() {
 	w := os.Stdout
-	fmt.Fprintln(w, "  "+paint(cYellow, "ℹ  No Gemini API key found in this session."))
+	fmt.Fprintln(w, "  "+paint(cYellow, "ℹ  No OpenRouter API key found in this session."))
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "  "+paint(cWhite+cBold, "Set it for this PowerShell session:"))
-	fmt.Fprintln(w, "    "+paint(cGreen, `$env:GEMINI_API_KEY = "AIza..."`))
+	fmt.Fprintln(w, "  "+paint(cWhite+cBold, "1. Get a free key (no credit card needed):"))
+	fmt.Fprintln(w, "    "+paint(cCyan, "https://openrouter.ai/keys"))
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "  "+paint(cWhite+cBold, "Or make it permanent (Windows):"))
-	fmt.Fprintln(w, "    "+paint(cGreen, `setx GEMINI_API_KEY "AIza..."`)+paint(cDim+cGray, "   # then open a new terminal"))
+	fmt.Fprintln(w, "  "+paint(cWhite+cBold, "2. Set it for this PowerShell session:"))
+	fmt.Fprintln(w, "    "+paint(cGreen, `$env:OPENROUTER_API_KEY = "sk-or-..."`))
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "  "+paint(cWhite+cBold, "Or pass it directly:"))
-	fmt.Fprintln(w, "    "+paint(cGreen, "veloce --api-key AIza..."))
+	fmt.Fprintln(w, "  "+paint(cWhite+cBold, "   Or make it permanent (Windows):"))
+	fmt.Fprintln(w, "    "+paint(cGreen, `setx OPENROUTER_API_KEY "sk-or-..."`)+paint(cDim+cGray, "  # open a new terminal after"))
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "  "+paint(cDim+cGray, "Get a key: https://aistudio.google.com/apikey"))
-	fmt.Fprintln(w, "  "+paint(cDim+cGray, "Or skip the API entirely with: ")+paint(cCyan, "veloce --dry-run"))
+	fmt.Fprintln(w, "  "+paint(cWhite+cBold, "   Or add it to your project .env:"))
+	fmt.Fprintln(w, "    "+paint(cGreen, `OPENROUTER_API_KEY=sk-or-...`)+paint(cDim+cGray, "   # inside your Laravel project"))
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "  "+paint(cWhite+cBold, "   Or pass it directly:"))
+	fmt.Fprintln(w, "    "+paint(cGreen, "veloce --api-key sk-or-..."))
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "  "+paint(cDim+cGray, "To analyze without any API call: ")+paint(cCyan, "veloce --dry-run"))
 	fmt.Fprintln(w)
 }
 
@@ -133,10 +138,11 @@ func PrintHelpfulHint() {
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "  "+paint(cWhite+cBold, "Useful flags:"))
 	fmt.Fprintln(w, "    "+paint(cCyan, "veloce --dry-run")+paint(cDim+cGray, "       # analyze only, zero API calls"))
-	fmt.Fprintln(w, "    "+paint(cCyan, "veloce --budget 500000")+paint(cDim+cGray, " # cap tokens (~$0.04)"))
-	fmt.Fprintln(w, "    "+paint(cCyan, "veloce status")+paint(cDim+cGray, "          # progress for current run"))
-	fmt.Fprintln(w, "    "+paint(cCyan, "veloce --help")+paint(cDim+cGray, "          # all options"))
+	fmt.Fprintln(w, "    "+paint(cCyan, "veloce --dry-run")+paint(cDim+cGray, "                    # analyze only, zero API calls"))
+	fmt.Fprintln(w, "    "+paint(cCyan, "veloce --batch-size 10 --delay 5")+paint(cDim+cGray, "  # smaller batches, shorter pause"))
+	fmt.Fprintln(w, "    "+paint(cCyan, "veloce status")+paint(cDim+cGray, "                      # progress for current run"))
+	fmt.Fprintln(w, "    "+paint(cCyan, "veloce --help")+paint(cDim+cGray, "                      # all options"))
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "  "+paint(cDim+cGray, "Need a Gemini API key?  https://aistudio.google.com/apikey"))
+	fmt.Fprintln(w, "  "+paint(cDim+cGray, "Need a free OpenRouter key?  https://openrouter.ai/keys"))
 	fmt.Fprintln(w)
 }
