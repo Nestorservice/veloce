@@ -128,11 +128,10 @@ func runMigrate(cmd *cobra.Command, args []string) error {
 		MaxRetries:  3,
 	}
 
-	// For the free-tier DeepSeek model (65 536-token context), we cap both the
-	// token budget and the file count. A 5-file batch at ~1 500 tok/file =
-	// ~7 500 tokens input, leaving ~57 000 for output (~11 000 tok/file of Go
-	// or Dart — plenty for most files). User can override with --batch-size.
-	const freeTierInputCap = 20_000 // ≈ 5 files × avg config/model file
+	// DeepSeek V4 Flash (free) has a 1M-token context window, so input budget
+	// is generous. We cap at 100K input to keep responses focused and avoid
+	// timeouts. User can override with --batch-size.
+	const freeTierInputCap = 100_000 // safe for 15-20 typical PHP files
 	batchOpts := batcher.Options{
 		MaxFiles:       cfg.BatchSize,
 		MaxInputTokens: freeTierInputCap,
