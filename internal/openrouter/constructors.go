@@ -62,3 +62,12 @@ func AttachAppMetadata(c Client, referer, title string) {
 		h.SetAppMetadata(referer, title)
 	}
 }
+
+// AttachProgress wires a live-status callback into a client. The callback is
+// called from within Complete() to report per-attempt status and rate-limit
+// countdown messages. Must be non-blocking.
+func AttachProgress(c Client, fn ProgressFunc) {
+	if h, ok := c.(*httpClient); ok {
+		h.SetProgress(fn)
+	}
+}

@@ -24,11 +24,16 @@ func (e *ErrDailyQuotaExceeded) Error() string {
 	return "openrouter daily quota exhausted — wait until reset, switch key, or top up"
 }
 
+// ProgressFunc is an optional callback the HTTP client calls to report live
+// status (sending request, rate-limited countdown, etc.). Implementations must
+// be non-blocking — use a buffered channel or a no-wait select.
+type ProgressFunc func(msg string)
+
 // httpClient is the shared implementation for Worker and Architect clients.
 // They differ only by name + model + (optionally) per-call defaults.
 type httpClient struct {
 	name    string // "worker" | "architect"
-	model   string // e.g. "deepseek/deepseek-v4-flash:free"
+	model   string // e.g. "qwen/qwen3-coder:free"
 	baseURL string
 	apiKey  string
 	http    *http.Client
@@ -37,7 +42,17 @@ type httpClient struct {
 	httpReferer string
 	xTitle      string
 
-	limiter *RateLimiter // shared across clients
+	limiter    *RateLimiter // shared across clients
+	onProgress ProgressFunc // live status callback (may be nil)
+}
+
+// SetProgress wires a live-progress callback into the client.
+func (c *httpClient) SetProgress(fn ProgressFunc) { c.onProgress = fn }
+
+func (c *httpClient) notifyProgress(msg string) {
+	if c.onProgress != nil {
+		c.onProgress(msg)
+	}
 }
 
 func (c *httpClient) Name() string  { return c.name }
@@ -139,6 +154,9 @@ func (c *httpClient) Complete(ctx context.Context, req CompletionRequest) (*Comp
 				return nil, err
 			}
 		}
+
+		c.notifyProgress(fmt.Sprintf("sending request · attempt %d/%d", attempt, maxAttempts))
+
 		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 		if err != nil {
 			return nil, err
@@ -152,6 +170,7 @@ func (c *httpClient) Complete(ctx context.Context, req CompletionRequest) (*Comp
 			httpReq.Header.Set("X-Title", c.xTitle)
 		}
 
+		c.notifyProgress(fmt.Sprintf("waiting for response · attempt %d/%d", attempt, maxAttempts))
 		resp, err := c.http.Do(httpReq)
 		if err != nil {
 			return nil, fmt.Errorf("openrouter request: %w", err)
@@ -166,7 +185,6 @@ func (c *httpClient) Complete(ctx context.Context, req CompletionRequest) (*Comp
 			}
 			delay := parseRetryDelay(resp.Header, raw)
 			if delay == 0 {
-				// Brief spec asks for a forced 30s pause when the free tier rate-limits.
 				delay = 30 * time.Second
 			} else {
 				delay += 2 * time.Second // small buffer
@@ -174,10 +192,24 @@ func (c *httpClient) Complete(ctx context.Context, req CompletionRequest) (*Comp
 			if c.limiter != nil {
 				c.limiter.Penalize(delay)
 			}
-			select {
-			case <-time.After(delay):
-			case <-ctx.Done():
-				return nil, ctx.Err()
+			// Countdown with live progress updates every second.
+			deadline := time.Now().Add(delay)
+			for {
+				remaining := time.Until(deadline)
+				if remaining <= 0 {
+					break
+				}
+				secs := int(remaining.Seconds()) + 1
+				c.notifyProgress(fmt.Sprintf("rate-limited · retry in %ds (attempt %d/%d)", secs, attempt, maxAttempts))
+				step := time.Second
+				if remaining < step {
+					step = remaining
+				}
+				select {
+				case <-time.After(step):
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
 			}
 			continue
 		}

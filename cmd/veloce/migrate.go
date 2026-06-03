@@ -188,8 +188,20 @@ func runMigrate(cmd *cobra.Command, args []string) error {
 			paint(cWhite, fmt.Sprintf("%s  (%d files, ~%d tokens)", b.ID, len(b.Files), b.InputTokens)),
 		)
 
+		// Live spinner while the batch is being processed.
+		progressCh, stopSpinner := startSpinner()
+		progressFn := func(msg string) {
+			select {
+			case progressCh <- msg:
+			default:
+			}
+		}
+		openrouter.AttachProgress(worker, progressFn)
+		openrouter.AttachProgress(architect, progressFn)
+
 		t0 := time.Now()
 		err := bw.Process(ctx, b)
+		stopSpinner()
 		dur := time.Since(t0).Round(100 * time.Millisecond)
 
 		_ = mig.Save()
@@ -276,6 +288,43 @@ func countFilesInPhase(files []scanner.File, phase int) int {
 		}
 	}
 	return n
+}
+
+// startSpinner starts a background goroutine that prints a live-updating
+// progress line (spinner + elapsed time + latest status message).
+// The returned channel accepts status strings from the HTTP client;
+// call stop() to erase the spinner line and terminate the goroutine.
+func startSpinner() (progressCh chan string, stop func()) {
+	ch := make(chan string, 32)
+	quit := make(chan struct{})
+
+	go func() {
+		frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+		tick := time.NewTicker(250 * time.Millisecond)
+		defer tick.Stop()
+		frame := 0
+		t0 := time.Now()
+		msg := "connecting…"
+		for {
+			select {
+			case <-quit:
+				fmt.Print("\r\033[K") // erase spinner line
+				return
+			case m := <-ch:
+				msg = m
+			case <-tick.C:
+				elapsed := time.Since(t0).Round(time.Second)
+				fmt.Printf("\r  %s  %s  %s\033[K",
+					paint(cYellow, frames[frame%len(frames)]),
+					paint(cDim+cGray, elapsed.String()),
+					paint(cDim+cGray, " · "+msg),
+				)
+				frame++
+			}
+		}
+	}()
+
+	return ch, func() { close(quit) }
 }
 
 func printDailyQuotaHint(_ *config.Config) {
