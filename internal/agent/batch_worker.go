@@ -55,13 +55,12 @@ func (bw *BatchWorker) Process(ctx context.Context, b batcher.Batch) error {
 
 	prompt := openrouter.BuildBatchPrompt(b)
 
-	// DeepSeek V4 Flash (free) has a 1M-token context window.
-	// We reserve input tokens + a 1 000-token safety margin and give the rest
-	// to output. We cap output at 32 768 tokens (OpenRouter limit) and never
-	// go below 4 096.
+	// Qwen3 Coder (free) has a 1M-token context window and up to 262K output.
+	// We cap at 65 536 output tokens (generous for any batch) and never go
+	// below 4 096.
 	const modelCtxLimit = 1_000_000
 	const minOutput = 4_096
-	const maxOutput = 32_768
+	const maxOutput = 65_536
 	outputBudget := modelCtxLimit - b.InputTokens - 1_000
 	if outputBudget < minOutput {
 		outputBudget = minOutput

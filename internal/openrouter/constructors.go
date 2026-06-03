@@ -10,11 +10,11 @@ import (
 // Override with NewWorkerClientWithModel / NewArchitectClientWithModel if the
 // :free suffix or the slug changes (OpenRouter periodically renames variants).
 const (
-	DefaultWorkerModel    = "deepseek/deepseek-v4-flash:free"
+	DefaultWorkerModel    = "qwen/qwen3-coder:free"
 	DefaultArchitectModel = "meta-llama/llama-3.3-70b-instruct:free"
 )
 
-// NewWorkerClient returns the heavy translator (DeepSeek V4 Flash, 1M ctx).
+// NewWorkerClient returns the heavy translator (Qwen3 Coder 480B, 1M ctx, 262K output).
 // Used for batched PHP→Go/Dart conversion in the worker pool.
 func NewWorkerClient(apiKey string) Client {
 	return newHTTP("worker", DefaultWorkerModel, apiKey)
