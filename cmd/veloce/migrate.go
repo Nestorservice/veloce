@@ -188,6 +188,33 @@ func runMigrate(cmd *cobra.Command, args []string) error {
 			paint(cWhite, fmt.Sprintf("%s  (%d files, ~%d tokens)", b.ID, len(b.Files), b.InputTokens)),
 		)
 
+		// Show the PHP files going into this batch and their expected output paths.
+		for i, f := range b.Files {
+			connector := "├─"
+			if i == len(b.Files)-1 {
+				connector = "└─"
+			}
+			var dst string
+			if f.Phase == 4 {
+				dst = openrouter.DartOutputPath(f.RelPath)
+			} else {
+				dst = openrouter.GoOutputPath(f.RelPath)
+			}
+			fmt.Printf("  %s %s  %s  %s\n",
+				paint(cDim+cGray, connector),
+				paint(cWhite, f.RelPath),
+				paint(cDim+cGray, "→"),
+				paint(cDim+cCyan, dst),
+			)
+		}
+
+		// Collect per-file results reported by BatchWorker after writing.
+		type fileResult struct{ src, out string; ok bool }
+		var fileResults []fileResult
+		bw.OnFileWritten = func(src, out string, ok bool) {
+			fileResults = append(fileResults, fileResult{src, out, ok})
+		}
+
 		// Live spinner while the batch is being processed.
 		progressCh, stopSpinner := startSpinner()
 		progressFn := func(msg string) {
@@ -231,6 +258,23 @@ func runMigrate(cmd *cobra.Command, args []string) error {
 			paint(cDim+cGray, dur.String()),
 			paint(cWhite, fmt.Sprintf("%d/%d files written", written, len(b.Files))),
 		)
+
+		// Print confirmed per-file translation results.
+		for _, r := range fileResults {
+			if r.ok {
+				fmt.Printf("       %s %s  →  %s\n",
+					paint(cGreen, "✓"),
+					paint(cWhite, r.src),
+					paint(cCyan, r.out),
+				)
+			} else {
+				fmt.Printf("       %s %s  →  %s\n",
+					paint(cPink, "✗"),
+					paint(cWhite, r.src),
+					paint(cPink, "(aucun output généré)"),
+				)
+			}
+		}
 	}
 
 	if currentPhase != 0 && !dailyQuotaHit {

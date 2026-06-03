@@ -25,12 +25,18 @@ import (
 // next run.
 type BatchWorker struct {
 	OutputRoot  string
-	Worker      openrouter.Client // DeepSeek V4 Flash
+	Worker      openrouter.Client // Qwen3 Coder – main translator
 	Architect   openrouter.Client // Llama 3.3 – used only for escalation
 	Migration   *state.MigrationState
 	TokenUsage  *state.TokenUsage
 	SystemRules string
 	MaxRetries  int // per-batch attempt ceiling (default 3)
+
+	// OnFileWritten is an optional callback called once per source file after
+	// the output has been written (or determined to be missing).
+	// srcRel is the PHP source path, outPath is the written Go/Dart path (empty
+	// if nothing was generated), ok is true only when a file was actually written.
+	OnFileWritten func(srcRel, outPath string, ok bool)
 }
 
 // ErrDailyQuota is returned when the API signals a per-day quota exhaustion
@@ -156,6 +162,9 @@ func (bw *BatchWorker) Process(ctx context.Context, b batcher.Batch) error {
 			entry.Status = state.StatusDone
 		}
 		bw.Migration.Mark(f.RelPath, entry)
+		if bw.OnFileWritten != nil {
+			bw.OnFileWritten(f.RelPath, outputPath, outputPath != "")
+		}
 	}
 
 	return nil
