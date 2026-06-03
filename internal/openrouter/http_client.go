@@ -215,7 +215,7 @@ func (c *httpClient) Complete(ctx context.Context, req CompletionRequest) (*Comp
 	}
 
 	if status >= 300 {
-		return nil, fmt.Errorf("openrouter %d: %s", status, string(raw))
+		return nil, fmt.Errorf("%s %d: %s", c.name, status, string(raw))
 	}
 
 	var parsed wireResp

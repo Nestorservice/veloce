@@ -404,16 +404,18 @@ func countFilesInPhase(files []scanner.File, phase int) int {
 }
 
 // isRateLimitErr returns true when the error means "this model is unavailable
-// right now — try a different one". This covers:
-//   - 429 rate-limit (provider temporarily overloaded)
-//   - 404 "No endpoints found" (all provider instances for this model are offline)
+// — try a different one". Covers:
+//   - 429  rate-limit (provider temporarily overloaded)
+//   - 404 "No endpoints found"  (all provider instances offline — OpenRouter)
+//   - 404 "model_not_found"     (model removed/renamed — Groq)
 func isRateLimitErr(err error) bool {
 	if err == nil {
 		return false
 	}
 	s := err.Error()
 	return strings.Contains(s, "429") ||
-		(strings.Contains(s, "404") && strings.Contains(s, "No endpoints found"))
+		(strings.Contains(s, "404") && strings.Contains(s, "No endpoints found")) ||
+		(strings.Contains(s, "404") && strings.Contains(s, "model_not_found"))
 }
 
 // resetBatchToPending resets every file in the batch back to StatusPending so

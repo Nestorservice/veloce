@@ -47,17 +47,19 @@ func NewWorkerClientWithModel(apiKey, model string) Client {
 
 // ---- Groq ------------------------------------------------------------------
 
-// Groq free-tier models. Kimi K2 is the best for agentic coding (256K ctx).
+// Groq free-tier models. qwen-2.5-coder-32b is the dedicated code model.
+// (moonshotai/kimi-k2 was deprecated 2026-03-23 → replaced by gpt-oss-120b)
 const (
-	DefaultGroqWorkerModel    = "moonshotai/kimi-k2-instruct-0905"
+	DefaultGroqWorkerModel    = "qwen-2.5-coder-32b"
 	DefaultGroqArchitectModel = "llama-3.3-70b-versatile"
 )
 
 // GroqFallbackWorkerModels are tried in order when the primary Groq model fails.
 var GroqFallbackWorkerModels = []string{
-	"deepseek-r1-distill-llama-70b", // DeepSeek R1 distilled — reasoning + code
-	"llama-3.3-70b-versatile",       // Llama 3.3 70B — very stable
-	"llama-3.1-8b-instant",          // Llama 3.1 8B — fast, last resort
+	"deepseek-r1-distill-qwen-32b", // DeepSeek R1 distill Qwen — reasoning + code
+	"qwen/qwen3-32b",               // Qwen 3 32B — thinking + code
+	"llama-3.3-70b-versatile",      // Llama 3.3 70B — very stable general
+	"llama-3.1-8b-instant",         // Llama 3.1 8B — fast last resort
 }
 
 // NewGroqWorkerClient returns the primary code translator using Groq.
