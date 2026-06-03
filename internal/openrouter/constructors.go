@@ -5,10 +5,15 @@ import (
 	"time"
 )
 
+// Base URLs
+const (
+	defaultBaseURL = "https://openrouter.ai/api/v1"
+	groqBaseURL    = "https://api.groq.com/openai/v1"
+)
+
+// ---- OpenRouter (default) --------------------------------------------------
+
 // Default free-tier model identifiers on OpenRouter.
-//
-// Override with NewWorkerClientWithModel / NewArchitectClientWithModel if the
-// :free suffix or the slug changes (OpenRouter periodically renames variants).
 const (
 	DefaultWorkerModel    = "qwen/qwen3-coder:free"
 	DefaultArchitectModel = "meta-llama/llama-3.3-70b-instruct:free"
@@ -16,7 +21,6 @@ const (
 
 // FallbackWorkerModels are tried in order when the primary worker model is
 // rate-limited (429) or has no endpoints (404) from its upstream provider.
-// Models span different providers so one outage doesn't kill the whole chain.
 // openrouter/free is the last resort — it auto-routes to whatever is available.
 var FallbackWorkerModels = []string{
 	"deepseek/deepseek-r1:free",       // DeepSeek R1 — reasoning + code
@@ -26,58 +30,83 @@ var FallbackWorkerModels = []string{
 	"openrouter/free",                 // auto-router: picks whatever is up right now
 }
 
-// NewWorkerClient returns the heavy translator (Qwen3 Coder 480B, 1M ctx, 262K output).
-// Used for batched PHP→Go/Dart conversion in the worker pool.
+// NewWorkerClient returns the primary code translator using OpenRouter.
 func NewWorkerClient(apiKey string) Client {
-	return newHTTP("worker", DefaultWorkerModel, apiKey)
+	return newHTTPWithBase("worker", DefaultWorkerModel, apiKey, defaultBaseURL)
 }
 
-// NewArchitectClient returns the planner (Llama 3.3 70B Instruct).
-// Used for arborescence analysis, batch design, escalation on stubborn files.
+// NewArchitectClient returns the planner using OpenRouter.
 func NewArchitectClient(apiKey string) Client {
-	return newHTTP("architect", DefaultArchitectModel, apiKey)
+	return newHTTPWithBase("architect", DefaultArchitectModel, apiKey, defaultBaseURL)
 }
 
-// NewWorkerClientWithModel lets callers pin a specific worker model
-// (e.g. a paid tier without the :free suffix).
+// NewWorkerClientWithModel lets callers pin a specific OpenRouter worker model.
 func NewWorkerClientWithModel(apiKey, model string) Client {
-	return newHTTP("worker", model, apiKey)
+	return newHTTPWithBase("worker", model, apiKey, defaultBaseURL)
 }
 
-// NewArchitectClientWithModel lets callers pin a specific architect model.
-func NewArchitectClientWithModel(apiKey, model string) Client {
-	return newHTTP("architect", model, apiKey)
+// ---- Groq ------------------------------------------------------------------
+
+// Groq free-tier models. Kimi K2 is the best for agentic coding (256K ctx).
+const (
+	DefaultGroqWorkerModel    = "moonshotai/kimi-k2-instruct-0905"
+	DefaultGroqArchitectModel = "llama-3.3-70b-versatile"
+)
+
+// GroqFallbackWorkerModels are tried in order when the primary Groq model fails.
+var GroqFallbackWorkerModels = []string{
+	"deepseek-r1-distill-llama-70b", // DeepSeek R1 distilled — reasoning + code
+	"llama-3.3-70b-versatile",       // Llama 3.3 70B — very stable
+	"llama-3.1-8b-instant",          // Llama 3.1 8B — fast, last resort
 }
 
-func newHTTP(name, model, apiKey string) *httpClient {
+// NewGroqWorkerClient returns the primary code translator using Groq.
+func NewGroqWorkerClient(apiKey string) Client {
+	return newHTTPWithBase("worker", DefaultGroqWorkerModel, apiKey, groqBaseURL)
+}
+
+// NewGroqArchitectClient returns the planner using Groq.
+func NewGroqArchitectClient(apiKey string) Client {
+	return newHTTPWithBase("architect", DefaultGroqArchitectModel, apiKey, groqBaseURL)
+}
+
+// NewGroqWorkerClientWithModel lets callers pin a specific Groq worker model.
+func NewGroqWorkerClientWithModel(apiKey, model string) Client {
+	return newHTTPWithBase("worker", model, apiKey, groqBaseURL)
+}
+
+// ---- shared constructors ---------------------------------------------------
+
+func newHTTPWithBase(name, model, apiKey, baseURL string) *httpClient {
 	return &httpClient{
 		name:    name,
 		model:   model,
-		baseURL: defaultBaseURL,
+		baseURL: baseURL,
 		apiKey:  apiKey,
 		http:    &http.Client{Timeout: 5 * time.Minute},
 	}
 }
 
-// AttachLimiter wires a shared rate limiter into a client returned by any of
-// the constructors above. No-op if the client is not the built-in HTTP impl.
+// newHTTP keeps backward compat with the old zero-arg base URL form.
+func newHTTP(name, model, apiKey string) *httpClient {
+	return newHTTPWithBase(name, model, apiKey, defaultBaseURL)
+}
+
+// AttachLimiter wires a shared rate limiter into a client.
 func AttachLimiter(c Client, l *RateLimiter) {
 	if h, ok := c.(*httpClient); ok {
 		h.SetRateLimiter(l)
 	}
 }
 
-// AttachAppMetadata sets the OpenRouter app-stats headers (HTTP-Referer + X-Title).
-// Both are optional but recommended for visibility in the OpenRouter dashboard.
+// AttachAppMetadata sets the HTTP-Referer and X-Title headers (OpenRouter only).
 func AttachAppMetadata(c Client, referer, title string) {
 	if h, ok := c.(*httpClient); ok {
 		h.SetAppMetadata(referer, title)
 	}
 }
 
-// AttachProgress wires a live-status callback into a client. The callback is
-// called from within Complete() to report per-attempt status and rate-limit
-// countdown messages. Must be non-blocking.
+// AttachProgress wires a live-status callback into a client.
 func AttachProgress(c Client, fn ProgressFunc) {
 	if h, ok := c.(*httpClient); ok {
 		h.SetProgress(fn)

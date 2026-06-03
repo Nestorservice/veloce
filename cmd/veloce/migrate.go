@@ -34,13 +34,14 @@ func registerMigrateFlags(flags *pflag.FlagSet) {
 	flags.StringVar(&migrateFlags.Source, "source", "", "Path to Laravel project (default: current directory)")
 	flags.StringVar(&migrateFlags.Output, "output", "", "Output path (default: <project>_output next to source)")
 	flags.IntVar(&migrateFlags.Workers, "workers", 0, "Parallel batch workers (default: 3)")
-	flags.StringVar(&migrateFlags.APIKey, "api-key", "", "OpenRouter API key (or $OPENROUTER_API_KEY)")
+	flags.StringVar(&migrateFlags.APIKey, "api-key", "", "API key — OpenRouter or Groq (or set env var)")
+	flags.StringVar(&migrateFlags.Provider, "provider", "", "AI provider: groq or openrouter (default: auto-detect from env)")
 	flags.BoolVar(&migrateFlags.Resume, "resume", true, "Resume from last checkpoint if present")
 	flags.BoolVar(&migrateFlags.DryRun, "dry-run", false, "Scan only — no API calls, no writes")
 	flags.BoolVar(&migrateFlags.RunTests, "run-tests", false, "Run go test / flutter test after each batch")
-	flags.IntVar(&migrateFlags.RPM, "rpm", 0, "Max API requests/min (default: 10 — OpenRouter free tier)")
-	flags.IntVar(&migrateFlags.Delay, "delay", 0, "Forced pause in seconds between batches (default: 10)")
-	flags.IntVar(&migrateFlags.BatchSize, "batch-size", 0, "Max files per batch (default: 15)")
+	flags.IntVar(&migrateFlags.RPM, "rpm", 0, "Max API requests/min (default: 30 Groq / 10 OpenRouter)")
+	flags.IntVar(&migrateFlags.Delay, "delay", 0, "Forced pause in seconds between batches")
+	flags.IntVar(&migrateFlags.BatchSize, "batch-size", 0, "Max files per batch (default: 5)")
 }
 
 func init() {
@@ -103,23 +104,43 @@ func runMigrate(cmd *cobra.Command, args []string) error {
 		tu = state.NewTokenUsage(cfg.Output, cfg.BudgetLimit)
 	}
 
-	// API clients (OpenRouter).
-	// Build worker chain: primary + fallbacks tried in order on 429.
+	// Build API clients for the chosen provider.
+	// The worker chain = primary model + fallbacks tried in order on 429/404.
 	limiter := openrouter.NewRateLimiter(cfg.RPM, time.Duration(cfg.Delay)*time.Second)
-	architect := openrouter.NewArchitectClient(cfg.APIKey)
-	openrouter.AttachLimiter(architect, limiter)
-	openrouter.AttachAppMetadata(architect, "https://github.com/Nestorservice/veloce", "Veloce")
 
-	allModels := append([]string{openrouter.DefaultWorkerModel}, openrouter.FallbackWorkerModels...)
+	isGroq := cfg.Provider == "groq"
+	var architect openrouter.Client
+	var allModels []string
+
+	if isGroq {
+		architect = openrouter.NewGroqArchitectClient(cfg.APIKey)
+		allModels = append([]string{openrouter.DefaultGroqWorkerModel}, openrouter.GroqFallbackWorkerModels...)
+	} else {
+		architect = openrouter.NewArchitectClient(cfg.APIKey)
+		openrouter.AttachAppMetadata(architect, "https://github.com/Nestorservice/veloce", "Veloce")
+		allModels = append([]string{openrouter.DefaultWorkerModel}, openrouter.FallbackWorkerModels...)
+	}
+	openrouter.AttachLimiter(architect, limiter)
+
 	workerClients := make([]openrouter.Client, len(allModels))
 	for i, model := range allModels {
-		c := openrouter.NewWorkerClientWithModel(cfg.APIKey, model)
+		var c openrouter.Client
+		if isGroq {
+			c = openrouter.NewGroqWorkerClientWithModel(cfg.APIKey, model)
+		} else {
+			c = openrouter.NewWorkerClientWithModel(cfg.APIKey, model)
+			openrouter.AttachAppMetadata(c, "https://github.com/Nestorservice/veloce", "Veloce")
+		}
 		openrouter.AttachLimiter(c, limiter)
-		openrouter.AttachAppMetadata(c, "https://github.com/Nestorservice/veloce", "Veloce")
 		workerClients[i] = c
 	}
 	currentWorkerIdx := 0
 
+	providerLabel := "OpenRouter"
+	if isGroq {
+		providerLabel = "Groq"
+	}
+	fmt.Printf("  %s %s\n", paint(cGray, "Provider:"), paint(cCyan, providerLabel))
 	fmt.Printf("  %s %s\n", paint(cGray, "Worker  :"), paint(cCyan, workerClients[0].Model()))
 	fmt.Printf("  %s %s\n", paint(cGray, "Fallback:"), paint(cDim+cGray, strings.Join(allModels[1:], " → ")))
 	fmt.Printf("  %s %s\n", paint(cGray, "Planner :"), paint(cPurple, architect.Model()))

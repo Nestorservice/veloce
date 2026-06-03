@@ -21,6 +21,7 @@ type Flags struct {
 	RPM       int
 	Delay     int // forced pause in seconds between batches
 	BatchSize int // max files per batch
+	Provider  string // "openrouter" | "groq" | "" (auto-detect)
 	// Legacy Gemini budget field — kept so existing callers compile.
 	BudgetLimit int
 }
@@ -37,12 +38,13 @@ type Config struct {
 	RPM       int
 	Delay     int
 	BatchSize int
+	Provider  string // "openrouter" | "groq"
 	// Legacy — kept for token tracker compatibility.
 	BudgetLimit int
 }
 
 // Load validates flags, applies defaults, and resolves env vars.
-// It also reads $SOURCE/.env if present so OPENROUTER_API_KEY can live there.
+// Provider auto-detection: if GROQ_API_KEY is set → groq, else → openrouter.
 func Load(f Flags) (*Config, error) {
 	c := &Config{
 		Source:      f.Source,
@@ -55,6 +57,7 @@ func Load(f Flags) (*Config, error) {
 		RPM:         f.RPM,
 		Delay:       f.Delay,
 		BatchSize:   f.BatchSize,
+		Provider:    f.Provider,
 		BudgetLimit: f.BudgetLimit,
 	}
 
@@ -82,42 +85,70 @@ func Load(f Flags) (*Config, error) {
 		c.Output = filepath.Join(parent, name+"_output")
 	}
 
-	// --- defaults ----------------------------------------------------------
+	// --- API key + provider auto-detection ---------------------------------
+	// Priority for Groq:        flag --api-key > GROQ_API_KEY env > .env GROQ_API_KEY
+	// Priority for OpenRouter:  flag --api-key > OPENROUTER_API_KEY env > .env > GEMINI_API_KEY
+
+	groqKey := os.Getenv("GROQ_API_KEY")
+	if groqKey == "" {
+		groqKey = readDotEnv(c.Source, "GROQ_API_KEY")
+	}
+	orKey := os.Getenv("OPENROUTER_API_KEY")
+	if orKey == "" {
+		orKey = readDotEnv(c.Source, "OPENROUTER_API_KEY")
+	}
+	if orKey == "" {
+		orKey = os.Getenv("GEMINI_API_KEY") // backward compat
+	}
+
+	// Auto-detect provider if not forced via flag.
+	if c.Provider == "" {
+		if groqKey != "" {
+			c.Provider = "groq"
+		} else {
+			c.Provider = "openrouter"
+		}
+	}
+
+	// Resolve the API key for the chosen provider.
+	if c.APIKey == "" {
+		if c.Provider == "groq" {
+			c.APIKey = groqKey
+		} else {
+			c.APIKey = orKey
+		}
+	}
+
+	if c.APIKey == "" && !c.DryRun {
+		return nil, ErrMissingAPIKey
+	}
+
+	// --- defaults (tuned per provider) ------------------------------------
 	if c.Workers == 0 {
-		c.Workers = 3 // conservative for free-tier OpenRouter
+		c.Workers = 3
 	}
 	if c.RPM == 0 {
-		c.RPM = 10 // OpenRouter free tier allows ~10 rpm
+		if c.Provider == "groq" {
+			c.RPM = 30 // Groq free tier is much more generous (~30 rpm)
+		} else {
+			c.RPM = 10 // OpenRouter free tier ~10 rpm
+		}
 	}
 	if c.Workers > c.RPM {
 		c.Workers = c.RPM
 	}
 	if c.Delay == 0 {
-		c.Delay = 10 // 10s forced pause between batches (free tier safety)
+		if c.Provider == "groq" {
+			c.Delay = 3 // Groq is fast and stable — short pause is enough
+		} else {
+			c.Delay = 10 // OpenRouter free tier needs longer pause
+		}
 	}
 	if c.BatchSize == 0 {
-		// Free-tier DeepSeek context = 65 536 tokens. 5 files × ~2 000 tok/file
-		// input leaves ~55 000 tokens for output — comfortable margin.
 		c.BatchSize = 5
 	}
 	if c.BudgetLimit == 0 {
 		c.BudgetLimit = 5_000_000
-	}
-
-	// --- API key -----------------------------------------------------------
-	// Priority: flag > OPENROUTER_API_KEY env > .env file > legacy GEMINI_API_KEY env
-	if c.APIKey == "" {
-		c.APIKey = os.Getenv("OPENROUTER_API_KEY")
-	}
-	if c.APIKey == "" {
-		c.APIKey = readDotEnv(c.Source, "OPENROUTER_API_KEY")
-	}
-	if c.APIKey == "" {
-		// Fallback: allow old Gemini key env var for backward compat.
-		c.APIKey = os.Getenv("GEMINI_API_KEY")
-	}
-	if c.APIKey == "" && !c.DryRun {
-		return nil, ErrMissingAPIKey
 	}
 
 	return c, nil
@@ -158,5 +189,5 @@ func readDotEnv(root, key string) string {
 
 var (
 	ErrNotLaravel    = errors.New("not a Laravel project")
-	ErrMissingAPIKey = errors.New("API key required: pass --api-key or set OPENROUTER_API_KEY")
+	ErrMissingAPIKey = errors.New("API key required: set GROQ_API_KEY or OPENROUTER_API_KEY (or pass --api-key)")
 )

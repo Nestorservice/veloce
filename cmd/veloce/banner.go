@@ -103,27 +103,26 @@ func PrintRunHeader(source, output string, files int, breakdown string, budget i
 	fmt.Fprintln(w, "└"+strings.Repeat("─", 58)+"┘")
 }
 
-// PrintMissingAPIKeyHint is shown when the OpenRouter API key is not provided.
+// PrintMissingAPIKeyHint is shown when no API key is found.
 func PrintMissingAPIKeyHint() {
 	w := os.Stdout
-	fmt.Fprintln(w, "  "+paint(cYellow, "ℹ  No OpenRouter API key found in this session."))
+	fmt.Fprintln(w, "  "+paint(cYellow, "ℹ  No API key found (Groq or OpenRouter)."))
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "  "+paint(cWhite+cBold, "1. Get a free key (no credit card needed):"))
-	fmt.Fprintln(w, "    "+paint(cCyan, "https://openrouter.ai/keys"))
+	fmt.Fprintln(w, "  "+paint(cCyan+cBold, "── Option A: Groq (recommandé — rapide, stable, gratuit) ──"))
+	fmt.Fprintln(w, "  "+paint(cWhite, "1. Clé gratuite : ")+paint(cCyan, "https://console.groq.com/keys"))
+	fmt.Fprintln(w, "  "+paint(cWhite, "2. Activer :"))
+	fmt.Fprintln(w, "    "+paint(cGreen, `$env:GROQ_API_KEY = "gsk_..."`))
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "  "+paint(cWhite+cBold, "2. Set it for this PowerShell session:"))
+	fmt.Fprintln(w, "  "+paint(cGray+cBold, "── Option B: OpenRouter (beaucoup de modèles gratuits) ──"))
+	fmt.Fprintln(w, "  "+paint(cWhite, "1. Clé gratuite : ")+paint(cCyan, "https://openrouter.ai/keys"))
+	fmt.Fprintln(w, "  "+paint(cWhite, "2. Activer :"))
 	fmt.Fprintln(w, "    "+paint(cGreen, `$env:OPENROUTER_API_KEY = "sk-or-..."`))
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "  "+paint(cWhite+cBold, "   Or make it permanent (Windows):"))
-	fmt.Fprintln(w, "    "+paint(cGreen, `setx OPENROUTER_API_KEY "sk-or-..."`)+paint(cDim+cGray, "  # open a new terminal after"))
+	fmt.Fprintln(w, "  "+paint(cDim+cGray, "Permanent Windows : ")+paint(cGreen, `setx GROQ_API_KEY "gsk_..."`)+paint(cDim+cGray, "  # rouvre le terminal"))
+	fmt.Fprintln(w, "  "+paint(cDim+cGray, "Dans .env Laravel : ")+paint(cGreen, "GROQ_API_KEY=gsk_..."))
+	fmt.Fprintln(w, "  "+paint(cDim+cGray, "Directement :       ")+paint(cGreen, "veloce --api-key gsk_... --provider groq"))
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "  "+paint(cWhite+cBold, "   Or add it to your project .env:"))
-	fmt.Fprintln(w, "    "+paint(cGreen, `OPENROUTER_API_KEY=sk-or-...`)+paint(cDim+cGray, "   # inside your Laravel project"))
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "  "+paint(cWhite+cBold, "   Or pass it directly:"))
-	fmt.Fprintln(w, "    "+paint(cGreen, "veloce --api-key sk-or-..."))
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "  "+paint(cDim+cGray, "To analyze without any API call: ")+paint(cCyan, "veloce --dry-run"))
+	fmt.Fprintln(w, "  "+paint(cDim+cGray, "Sans appel API :    ")+paint(cCyan, "veloce --dry-run"))
 	fmt.Fprintln(w)
 }
 

@@ -14,8 +14,6 @@ import (
 	"time"
 )
 
-const defaultBaseURL = "https://openrouter.ai/api/v1"
-
 // ErrDailyQuotaExceeded signals a per-day quota hit. The free tier of
 // OpenRouter resets daily; retries within the same day are pointless.
 type ErrDailyQuotaExceeded struct{ Body string }
