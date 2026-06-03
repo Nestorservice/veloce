@@ -14,6 +14,14 @@ const (
 	DefaultArchitectModel = "meta-llama/llama-3.3-70b-instruct:free"
 )
 
+// FallbackWorkerModels are tried in order when the primary worker model is
+// rate-limited (429) by its upstream provider. Veloce switches automatically
+// and sticks to the fallback for the rest of the session.
+var FallbackWorkerModels = []string{
+	"deepseek/deepseek-r1:free",   // strong reasoning + code, stable
+	"deepseek/deepseek-chat:free", // DeepSeek V3, very stable last resort
+}
+
 // NewWorkerClient returns the heavy translator (Qwen3 Coder 480B, 1M ctx, 262K output).
 // Used for batched PHP→Go/Dart conversion in the worker pool.
 func NewWorkerClient(apiKey string) Client {

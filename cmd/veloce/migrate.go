@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -103,15 +104,24 @@ func runMigrate(cmd *cobra.Command, args []string) error {
 	}
 
 	// API clients (OpenRouter).
-	worker := openrouter.NewWorkerClient(cfg.APIKey)
-	architect := openrouter.NewArchitectClient(cfg.APIKey)
+	// Build worker chain: primary + fallbacks tried in order on 429.
 	limiter := openrouter.NewRateLimiter(cfg.RPM, time.Duration(cfg.Delay)*time.Second)
-	openrouter.AttachLimiter(worker, limiter)
+	architect := openrouter.NewArchitectClient(cfg.APIKey)
 	openrouter.AttachLimiter(architect, limiter)
-	openrouter.AttachAppMetadata(worker, "https://github.com/Nestorservice/veloce", "Veloce")
 	openrouter.AttachAppMetadata(architect, "https://github.com/Nestorservice/veloce", "Veloce")
 
-	fmt.Printf("  %s %s\n", paint(cGray, "Worker  :"), paint(cCyan, worker.Model()))
+	allModels := append([]string{openrouter.DefaultWorkerModel}, openrouter.FallbackWorkerModels...)
+	workerClients := make([]openrouter.Client, len(allModels))
+	for i, model := range allModels {
+		c := openrouter.NewWorkerClientWithModel(cfg.APIKey, model)
+		openrouter.AttachLimiter(c, limiter)
+		openrouter.AttachAppMetadata(c, "https://github.com/Nestorservice/veloce", "Veloce")
+		workerClients[i] = c
+	}
+	currentWorkerIdx := 0
+
+	fmt.Printf("  %s %s\n", paint(cGray, "Worker  :"), paint(cCyan, workerClients[0].Model()))
+	fmt.Printf("  %s %s\n", paint(cGray, "Fallback:"), paint(cDim+cGray, strings.Join(allModels[1:], " → ")))
 	fmt.Printf("  %s %s\n", paint(cGray, "Planner :"), paint(cPurple, architect.Model()))
 	fmt.Printf("  %s %s rpm  delay=%ds  batch=%d files  workers=%d\n",
 		paint(cGray, "Rate    :"), paint(cWhite, fmt.Sprintf("%d", cfg.RPM)),
@@ -120,7 +130,7 @@ func runMigrate(cmd *cobra.Command, args []string) error {
 
 	bw := &agent.BatchWorker{
 		OutputRoot:  cfg.Output,
-		Worker:      worker,
+		Worker:      workerClients[currentWorkerIdx],
 		Architect:   architect,
 		Migration:   mig,
 		TokenUsage:  tu,
@@ -208,58 +218,90 @@ func runMigrate(cmd *cobra.Command, args []string) error {
 			)
 		}
 
-		// Collect per-file results reported by BatchWorker after writing.
-		type fileResult struct{ src, out string; ok bool }
-		var fileResults []fileResult
-		bw.OnFileWritten = func(src, out string, ok bool) {
-			fileResults = append(fileResults, fileResult{src, out, ok})
+		// Process with automatic fallback on 429 rate-limit errors.
+		type fileResult struct {
+			src, out string
+			ok       bool
 		}
+		var (
+			lastErr     error
+			dur         time.Duration
+			fileResults []fileResult
+		)
 
-		// Live spinner while the batch is being processed.
-		progressCh, stopSpinner := startSpinner()
-		progressFn := func(msg string) {
-			select {
-			case progressCh <- msg:
-			default:
+		for {
+			// Reset per-attempt state.
+			fileResults = nil
+			bw.OnFileWritten = func(src, out string, ok bool) {
+				fileResults = append(fileResults, fileResult{src, out, ok})
 			}
-		}
-		openrouter.AttachProgress(worker, progressFn)
-		openrouter.AttachProgress(architect, progressFn)
 
-		t0 := time.Now()
-		err := bw.Process(ctx, b)
-		stopSpinner()
-		dur := time.Since(t0).Round(100 * time.Millisecond)
+			// Live spinner.
+			progressCh, stopSpinner := startSpinner()
+			progressFn := func(msg string) {
+				select {
+				case progressCh <- msg:
+				default:
+				}
+			}
+			openrouter.AttachProgress(bw.Worker, progressFn)
+			openrouter.AttachProgress(architect, progressFn)
 
-		_ = mig.Save()
-		_ = tu.Save()
+			t0 := time.Now()
+			lastErr = bw.Process(ctx, b)
+			stopSpinner()
+			dur = time.Since(t0).Round(100 * time.Millisecond)
 
-		if err != nil {
-			if errors.Is(err, agent.ErrDailyQuota) {
-				dailyQuotaHit = true
-				fmt.Printf("  %s  %s\n",
-					paint(cPink+cBold, "✗ quota  "),
-					paint(cPink, "daily free-tier quota exhausted"),
+			_ = mig.Save()
+			_ = tu.Save()
+
+			if lastErr == nil {
+				break // success
+			}
+			if errors.Is(lastErr, agent.ErrDailyQuota) {
+				break // fatal — handled below
+			}
+
+			// 429 rate-limit → try next model in fallback chain.
+			if isRateLimitErr(lastErr) && currentWorkerIdx < len(workerClients)-1 {
+				currentWorkerIdx++
+				bw.Worker = workerClients[currentWorkerIdx]
+				fmt.Printf("  %s  %s  %s\n",
+					paint(cYellow+cBold, "⚡ fallback"),
+					paint(cDim+cGray, "rate-limited · switching to"),
+					paint(cCyan, bw.Worker.Model()),
 				)
-				break
+				resetBatchToPending(mig, b)
+				_ = mig.Save()
+				continue // retry same batch with new model
 			}
+			break // non-429 or no more fallbacks
+		}
+
+		if errors.Is(lastErr, agent.ErrDailyQuota) {
+			dailyQuotaHit = true
+			fmt.Printf("  %s  %s\n",
+				paint(cPink+cBold, "✗ quota  "),
+				paint(cPink, "daily free-tier quota exhausted"),
+			)
+			break
+		}
+		if lastErr != nil {
 			fmt.Printf("  %s  %s  %s\n",
 				paint(cPink, "✗ fail   "),
 				paint(cDim+cGray, dur.String()),
-				paint(cPink, err.Error()),
+				paint(cPink, lastErr.Error()),
 			)
 			continue
 		}
 
-		// Count how many source files were actually written.
+		// Success — show confirmed per-file results.
 		written := countDone(mig, b)
 		fmt.Printf("  %s  %s  %s\n",
 			paint(cGreen, "✓ done   "),
 			paint(cDim+cGray, dur.String()),
 			paint(cWhite, fmt.Sprintf("%d/%d files written", written, len(b.Files))),
 		)
-
-		// Print confirmed per-file translation results.
 		for _, r := range fileResults {
 			if r.ok {
 				fmt.Printf("       %s %s  →  %s\n",
@@ -332,6 +374,23 @@ func countFilesInPhase(files []scanner.File, phase int) int {
 		}
 	}
 	return n
+}
+
+// isRateLimitErr returns true when the error is a 429 rate-limit response
+// from an upstream provider (not a daily quota exhaustion).
+func isRateLimitErr(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "429")
+}
+
+// resetBatchToPending resets every file in the batch back to StatusPending so
+// the batch can be retried with a different model.
+func resetBatchToPending(mig *state.MigrationState, b batcher.Batch) {
+	for _, f := range b.Files {
+		mig.Mark(f.RelPath, state.FileEntry{
+			Status: state.StatusPending,
+			Phase:  f.Phase,
+		})
+	}
 }
 
 // startSpinner starts a background goroutine that prints a live-updating
