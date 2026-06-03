@@ -145,7 +145,14 @@ func Load(f Flags) (*Config, error) {
 		}
 	}
 	if c.BatchSize == 0 {
-		c.BatchSize = 5
+		if c.Provider == "groq" {
+			// Groq free tier counts input+output in TPM.
+			// 1 file/batch ≈ 1 000 input + 8 192 output = ~9 800 tokens, which
+			// fits under llama-3.3-70b's 12 000 TPM limit.
+			c.BatchSize = 1
+		} else {
+			c.BatchSize = 5
+		}
 	}
 	if c.BudgetLimit == 0 {
 		c.BudgetLimit = 5_000_000
