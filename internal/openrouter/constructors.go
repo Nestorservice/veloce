@@ -47,19 +47,20 @@ func NewWorkerClientWithModel(apiKey, model string) Client {
 
 // ---- Groq ------------------------------------------------------------------
 
-// Groq models (confirmed available June 2026 from console.groq.com/docs/models).
-// qwen/qwen3-32b is the best for code+reasoning. gpt-oss-120b is the largest.
+// Groq models ordered by free-tier TPM (tokens/min) — highest first.
+// llama-3.1-8b-instant has the highest TPM on the free tier (~30K TPM).
+// qwen/qwen3-32b has only 6K TPM — used as fallback for smaller requests.
 const (
-	DefaultGroqWorkerModel    = "qwen/qwen3-32b"
+	DefaultGroqWorkerModel    = "llama-3.1-8b-instant"
 	DefaultGroqArchitectModel = "llama-3.3-70b-versatile"
 )
 
 // GroqFallbackWorkerModels are tried in order when the primary Groq model fails.
 var GroqFallbackWorkerModels = []string{
-	"openai/gpt-oss-120b",                        // GPT OSS 120B — largest, function calling
-	"meta-llama/llama-4-scout-17b-16e-instruct",  // Llama 4 Scout — fast, multilingual
-	"llama-3.3-70b-versatile",                    // Llama 3.3 70B — very stable
-	"openai/gpt-oss-20b",                         // GPT OSS 20B — fast last resort
+	"llama-3.3-70b-versatile",                   // Llama 3.3 70B — more capable, ~12K TPM
+	"openai/gpt-oss-20b",                        // GPT OSS 20B — fast
+	"qwen/qwen3-32b",                            // Qwen 3 32B — reasoning (6K TPM, low)
+	"meta-llama/llama-4-scout-17b-16e-instruct", // Llama 4 Scout — last resort
 }
 
 // NewGroqWorkerClient returns the primary code translator using Groq.

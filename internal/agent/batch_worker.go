@@ -61,13 +61,12 @@ func (bw *BatchWorker) Process(ctx context.Context, b batcher.Batch) error {
 
 	prompt := openrouter.BuildBatchPrompt(b)
 
-	// We cap output at 32 768 tokens — safe under every provider's limit:
-	//   Groq:        40 960 max_tokens for most models
-	//   OpenRouter:  32 768 typical cap
-	// 32 768 is more than enough for any 5-file batch.
+	// Cap output at 8 192 tokens — keeps total request under Groq free-tier
+	// TPM limits (~14K total for a 5-file batch).  8 192 tokens ≈ 350 lines
+	// of Go code per file which is plenty for typical PHP controllers/models.
 	const modelCtxLimit = 1_000_000
-	const minOutput = 4_096
-	const maxOutput = 32_768
+	const minOutput = 2_048
+	const maxOutput = 8_192
 	outputBudget := modelCtxLimit - b.InputTokens - 1_000
 	if outputBudget < minOutput {
 		outputBudget = minOutput
