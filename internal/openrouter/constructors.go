@@ -15,11 +15,13 @@ const (
 )
 
 // FallbackWorkerModels are tried in order when the primary worker model is
-// rate-limited (429) by its upstream provider. Veloce switches automatically
-// and sticks to the fallback for the rest of the session.
+// rate-limited (429) or has no endpoints (404) from its upstream provider.
+// Models span different providers so one outage doesn't kill the whole chain.
 var FallbackWorkerModels = []string{
-	"deepseek/deepseek-r1:free",   // strong reasoning + code, stable
-	"deepseek/deepseek-chat:free", // DeepSeek V3, very stable last resort
+	"deepseek/deepseek-r1:free",        // DeepSeek R1 — reasoning + code, different provider
+	"deepseek/deepseek-v4-flash:free",  // DeepSeek V4 Flash — 1M ctx, fast
+	"deepseek/deepseek-chat:free",      // DeepSeek V3 — very stable
+	"google/gemma-3-27b-it:free",       // Google Gemma 3 27B — different infra, ultra stable
 }
 
 // NewWorkerClient returns the heavy translator (Qwen3 Coder 480B, 1M ctx, 262K output).

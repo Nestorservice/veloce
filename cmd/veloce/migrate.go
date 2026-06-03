@@ -376,10 +376,17 @@ func countFilesInPhase(files []scanner.File, phase int) int {
 	return n
 }
 
-// isRateLimitErr returns true when the error is a 429 rate-limit response
-// from an upstream provider (not a daily quota exhaustion).
+// isRateLimitErr returns true when the error means "this model is unavailable
+// right now — try a different one". This covers:
+//   - 429 rate-limit (provider temporarily overloaded)
+//   - 404 "No endpoints found" (all provider instances for this model are offline)
 func isRateLimitErr(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "429")
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	return strings.Contains(s, "429") ||
+		(strings.Contains(s, "404") && strings.Contains(s, "No endpoints found"))
 }
 
 // resetBatchToPending resets every file in the batch back to StatusPending so
