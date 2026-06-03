@@ -120,8 +120,20 @@ func (bw *BatchWorker) Process(ctx context.Context, b batcher.Batch) error {
 			bw.TokenUsage.AddPro(resp.InputTokens, resp.OutputTokens)
 		}
 
-		// Parse the multi-file response.
+		// Parse the multi-file response — try delimiter format first.
 		parsed = openrouter.ParseBatchResponse(resp.Text)
+		if len(parsed) == 0 {
+			// Fallback: model may have used markdown fences instead of delimiters.
+			hints := make([]openrouter.PathHint, len(b.Files))
+			for i, f := range b.Files {
+				if f.Phase == 4 {
+					hints[i] = openrouter.PathHint{Path: openrouter.DartOutputPath(f.RelPath), Lang: "dart"}
+				} else {
+					hints[i] = openrouter.PathHint{Path: openrouter.GoOutputPath(f.RelPath), Lang: "go"}
+				}
+			}
+			parsed = openrouter.ParseMarkdownFallback(resp.Text, hints)
+		}
 		if len(parsed) > 0 {
 			break // success
 		}

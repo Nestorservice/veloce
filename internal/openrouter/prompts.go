@@ -63,6 +63,8 @@ Rules:
 
 // BuildBatchPrompt creates the user message for a single batch. Each source
 // file is delimited so the model knows where one file ends and the next begins.
+// A reminder section at the end shows the EXACT expected output headers so
+// smaller models that tend to use markdown fences still get it right.
 func BuildBatchPrompt(batch batcher.Batch) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Translate the following %d PHP/Blade file(s) to Go + Flutter.\n\n", len(batch.Files))
@@ -74,6 +76,21 @@ func BuildBatchPrompt(batch batcher.Batch) string {
 		}
 		b.WriteByte('\n')
 	}
+
+	// Explicit output reminder: show the EXACT delimiter the model must emit.
+	// This is critical for smaller models that tend to use markdown code fences.
+	b.WriteString("---\n")
+	b.WriteString("YOUR RESPONSE MUST START IMMEDIATELY WITH THE DELIMITER BELOW — no explanation, no prose before it:\n\n")
+	for _, f := range batch.Files {
+		var delim string
+		if f.Phase == 4 {
+			delim = fmt.Sprintf("=== DART: %s ===", DartOutputPath(f.RelPath))
+		} else {
+			delim = fmt.Sprintf("=== GO: %s ===", GoOutputPath(f.RelPath))
+		}
+		fmt.Fprintf(&b, "%s\n<your complete translated code here>\n\n", delim)
+	}
+	b.WriteString("Do NOT use markdown fences (``` go ```) around the delimiter line itself.\n")
 	return b.String()
 }
 
