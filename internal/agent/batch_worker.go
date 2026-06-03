@@ -61,12 +61,13 @@ func (bw *BatchWorker) Process(ctx context.Context, b batcher.Batch) error {
 
 	prompt := openrouter.BuildBatchPrompt(b)
 
-	// Qwen3 Coder (free) has a 1M-token context window and up to 262K output.
-	// We cap at 65 536 output tokens (generous for any batch) and never go
-	// below 4 096.
+	// We cap output at 32 768 tokens — safe under every provider's limit:
+	//   Groq:        40 960 max_tokens for most models
+	//   OpenRouter:  32 768 typical cap
+	// 32 768 is more than enough for any 5-file batch.
 	const modelCtxLimit = 1_000_000
 	const minOutput = 4_096
-	const maxOutput = 65_536
+	const maxOutput = 32_768
 	outputBudget := modelCtxLimit - b.InputTokens - 1_000
 	if outputBudget < minOutput {
 		outputBudget = minOutput
