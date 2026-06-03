@@ -17,11 +17,13 @@ const (
 // FallbackWorkerModels are tried in order when the primary worker model is
 // rate-limited (429) or has no endpoints (404) from its upstream provider.
 // Models span different providers so one outage doesn't kill the whole chain.
+// openrouter/free is the last resort — it auto-routes to whatever is available.
 var FallbackWorkerModels = []string{
-	"deepseek/deepseek-r1:free",        // DeepSeek R1 — reasoning + code, different provider
-	"deepseek/deepseek-v4-flash:free",  // DeepSeek V4 Flash — 1M ctx, fast
-	"deepseek/deepseek-chat:free",      // DeepSeek V3 — very stable
-	"google/gemma-3-27b-it:free",       // Google Gemma 3 27B — different infra, ultra stable
+	"deepseek/deepseek-r1:free",       // DeepSeek R1 — reasoning + code
+	"deepseek/deepseek-v4-flash:free", // DeepSeek V4 Flash — 1M ctx, fast
+	"deepseek/deepseek-chat:free",     // DeepSeek V3 — stable
+	"google/gemma-3-27b-it:free",      // Google Gemma 3 27B — different infra
+	"openrouter/free",                 // auto-router: picks whatever is up right now
 }
 
 // NewWorkerClient returns the heavy translator (Qwen3 Coder 480B, 1M ctx, 262K output).

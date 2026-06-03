@@ -262,20 +262,26 @@ func runMigrate(cmd *cobra.Command, args []string) error {
 				break // fatal — handled below
 			}
 
-			// 429 rate-limit → try next model in fallback chain.
+			// 429 / "No endpoints" → try next model in fallback chain.
 			if isRateLimitErr(lastErr) && currentWorkerIdx < len(workerClients)-1 {
 				currentWorkerIdx++
 				bw.Worker = workerClients[currentWorkerIdx]
+				reason := "rate-limited"
+				if strings.Contains(lastErr.Error(), "No endpoints") {
+					reason = "no endpoints"
+				}
 				fmt.Printf("  %s  %s  %s\n",
 					paint(cYellow+cBold, "⚡ fallback"),
-					paint(cDim+cGray, "rate-limited · switching to"),
+					paint(cDim+cGray, reason+" · switching to"),
 					paint(cCyan, bw.Worker.Model()),
 				)
+				// Brief pause before retrying so providers have a chance to recover.
+				time.Sleep(3 * time.Second)
 				resetBatchToPending(mig, b)
 				_ = mig.Save()
 				continue // retry same batch with new model
 			}
-			break // non-429 or no more fallbacks
+			break // no more fallbacks or non-retryable error
 		}
 
 		if errors.Is(lastErr, agent.ErrDailyQuota) {
