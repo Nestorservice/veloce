@@ -22,7 +22,7 @@ var FallbackWorkerModels = []string{
 	"deepseek/deepseek-r1:free",       // DeepSeek R1 — reasoning + code
 	"deepseek/deepseek-v4-flash:free", // DeepSeek V4 Flash — 1M ctx, fast
 	"deepseek/deepseek-chat:free",     // DeepSeek V3 — stable
-	"google/gemma-3-27b-it:free",      // Google Gemma 3 27B — different infra
+	"google/gemma-4-31b-it:free",      // Google Gemma 4 31B — different infra
 	"openrouter/free",                 // auto-router: picks whatever is up right now
 }
 
